@@ -8,7 +8,7 @@ const sendMail=require("../utils/mailer");
 // -------------------- Get tools borrowed by user --------------------
 router.get("/borrowed/:userId", authenticateToken, async (req, res) => {
   try {
-    const tools = await Tool.find({ borrowedBy: req.params.userId, available: false });
+    const tools = await Tool.find({ borrowedBy: req.params.userId, available: false }).populate('owner');
     res.json(tools);
   } catch (err) {
     console.error(err);

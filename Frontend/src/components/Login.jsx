@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import {jwtDecode} from "jwt-decode";
 // correct import
+import { UserCircleIcon, AtSymbolIcon, LockClosedIcon } from "@heroicons/react/24/solid";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -50,50 +51,77 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">
-          Welcome Back to ToolSwap
-        </h2>
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+        <div className="flex flex-col items-center">
+          <div className="w-16 h-16 bg-sky-400 text-white rounded-full flex items-center justify-center shadow-lg mb-4">
+            <UserCircleIcon className="w-8 h-8" />
+          </div>
+          <h2 className="text-3xl font-bold text-gray-800 mb-2 text-center">
+            Welcome Back
+          </h2>
+          <p className="text-gray-500 mb-6 text-center">
+            Sign in to continue to your dashboard.
+          </p>
+        </div>
 
         {error && (
-          <p className="bg-red-100 text-red-700 p-2 mb-4 rounded">{error}</p>
+          <div className="bg-red-50 border border-red-200 text-red-700 p-4 mb-6 rounded-lg text-sm">
+            <p className="font-semibold">Login Failed:</p>
+            <p>{error}</p>
+          </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-gray-700 mb-2">Email</label>
-            <input
-              type="email"
-              className="w-full border border-gray-300 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="relative">
+            <label className="block text-gray-700 font-medium mb-2" htmlFor="email">
+              Email
+            </label>
+            <div className="relative">
+              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                <AtSymbolIcon className="h-5 w-5" />
+              </span>
+              <input
+                type="email"
+                id="email"
+                className="w-full border border-gray-300 rounded-lg p-3 pl-10 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-shadow duration-300"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
           </div>
 
-          <div>
-            <label className="block text-gray-700 mb-2">Password</label>
-            <input
-              type="password"
-              className="w-full border border-gray-300 rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+          <div className="relative">
+            <label className="block text-gray-700 font-medium mb-2" htmlFor="password">
+              Password
+            </label>
+            <div className="relative">
+              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                <LockClosedIcon className="h-5 w-5" />
+              </span>
+              <input
+                type="password"
+                id="password"
+                className="w-full border border-gray-300 rounded-lg p-3 pl-10 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-shadow duration-300"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
           </div>
 
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white font-semibold py-2 rounded-md hover:bg-blue-700 transition"
+            className="w-full bg-sky-400 text-white font-bold py-3 rounded-lg hover:bg-sky-500 transition-colors duration-300 shadow-md"
           >
             Login
           </button>
         </form>
 
-        <p className="mt-4 text-center text-gray-600">
+        <p className="mt-6 text-center text-gray-600">
           Don’t have an account?{" "}
-          <Link to="/signup" className="text-blue-600 hover:underline">
+          <Link to="/signup" className="text-sky-500 font-semibold hover:underline">
             Sign up
           </Link>
         </p>
