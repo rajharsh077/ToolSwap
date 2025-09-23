@@ -12,6 +12,8 @@ const UserProfile = () => {
   const [toolsWithBorrowers, setToolsWithBorrowers] = useState([]);
   const [expandedToolId, setExpandedToolId] = useState(null);
   const { name } = useParams();
+  const [userId, setUserId] = useState(null);
+
 
   const [activeTab, setActiveTab] = useState("listed");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -29,6 +31,7 @@ const UserProfile = () => {
       let userId;
       try {
         const decoded = jwtDecode(token);
+        setUserId(decoded.id || decoded._id);
         userId = decoded.id || decoded._id;
       } catch {
         toast.error("Invalid token. Please login again.");
@@ -141,6 +144,8 @@ const UserProfile = () => {
     const token = localStorage.getItem("token");
     const headers = { Authorization: `Bearer ${token}` };
 
+    if (!userId) return;
+
     try {
       await axios.put(
         `http://localhost:3000/tools/request/${reqObj.toolId}/${reqObj.borrowerId}`,
@@ -157,6 +162,8 @@ const UserProfile = () => {
       } else if (reqObj.status === "rejected") {
         toast.info("Request rejected!");
       }
+      const refreshedRequests = await axios.get(`http://localhost:3000/tools/requests/${userId}`, { headers });
+       setRequests(refreshedRequests.data.filter(r => r.status === "pending"));
     } catch (err) {
       console.error(err);
       toast.error("Failed to update request.");

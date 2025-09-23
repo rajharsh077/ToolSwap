@@ -3,11 +3,12 @@ const router = express.Router();
 const Tool = require("../models/tool");
 const User = require("../models/users");
 const { authenticateToken } = require("../middlewares/AuthMiddleware");
+const sendMail=require("../utils/mailer");
 
 // -------------------- Get tools borrowed by user --------------------
 router.get("/borrowed/:userId", authenticateToken, async (req, res) => {
   try {
-    const tools = await Tool.find({ borrowedBy: req.params.userId });
+    const tools = await Tool.find({ borrowedBy: req.params.userId, available: false });
     res.json(tools);
   } catch (err) {
     console.error(err);
@@ -57,6 +58,13 @@ router.post("/request/:toolId", authenticateToken, async (req, res) => {
     if (!tool.available) return res.status(400).json({ message: "Tool not available" });
 
     const borrower = await User.findById(userId);
+
+    // Prevent duplicate requests
+    const existingRequest = borrower.toolsRequested.find(
+      (t) => t.tool.toString() === toolId && t.status === "pending"
+    );
+    if (existingRequest) return res.status(400).json({ message: "You already requested this tool." });
+
     borrower.toolsRequested.push({
       tool: tool._id,
       status: "pending",
@@ -73,12 +81,21 @@ router.post("/request/:toolId", authenticateToken, async (req, res) => {
     });
     await owner.save();
 
+     sendMail({
+      to: owner.email,
+      subject: `New Borrow Request for "${tool.title}"`,
+      text: `${borrower.name} has requested to borrow your tool "${tool.title}".`,
+      html: `<p><strong>${borrower.name}</strong> has requested to borrow your tool <strong>${tool.title}</strong>.</p>`,
+    })
+    .then(() => console.log(`Email sent to ${owner.email}`))
+    .catch((err) => console.error("Error sending email:", err));
     res.status(200).json({ message: "Borrow request sent successfully" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
+
 // -------------------- Approve or Reject a borrow request --------------------
 router.put("/request/:toolId/:borrowerId", authenticateToken, async (req, res) => {
   try {
@@ -95,21 +112,58 @@ router.put("/request/:toolId/:borrowerId", authenticateToken, async (req, res) =
     const borrower = await User.findById(borrowerId);
     if (!borrower) return res.status(404).json({ message: "Borrower not found" });
 
-    const toolEntryOwner = owner.toolsLentOut.find(t => t.tool.toString() === toolId && t.borrower.toString() === borrowerId);
+    const toolEntryOwner = owner.toolsLentOut.find(
+      (t) => t.tool.toString() === toolId && t.borrower.toString() === borrowerId
+    );
     if (!toolEntryOwner) return res.status(404).json({ message: "Tool request not found for owner" });
 
-    const toolEntryBorrower = borrower.toolsRequested.find(t => t.tool.toString() === toolId);
+    const toolEntryBorrower = borrower.toolsRequested.find((t) => t.tool.toString() === toolId);
     if (!toolEntryBorrower) return res.status(404).json({ message: "Tool request not found for borrower" });
 
-    toolEntryOwner.status = status;
-    toolEntryBorrower.status = status;
+    if (status === "approved") {
+      toolEntryOwner.status = "approved";
+      toolEntryBorrower.status = "approved";
+
+      await Tool.findByIdAndUpdate(toolId, {
+        available: false,
+        borrowedBy: borrowerId,
+        borrowedAt: new Date(),
+      });
+
+      sendMail({
+        to: borrower.email,
+        subject: `Your Borrow Request for "${toolEntryOwner.tool}" is Approved`,
+        text: `Your request to borrow "${toolEntryOwner.tool}" has been approved!`,
+      })
+      .then(() => console.log(`Approval email sent to ${borrower.email}`))
+      .catch(err => console.error("Error sending approval email:", err));
+
+      sendMail({
+        to: owner.email,
+        subject: `You have successfully lent "${toolEntryOwner.tool}"`,
+        text: `You have successfully lent your tool "${toolEntryOwner.tool}" to ${borrower.name}.`,
+      })
+      .then(() => console.log(`Lent-success email sent to owner: ${owner.email}`))
+      .catch(err => console.error("Error sending email to owner:", err));
+    } else if (status === "rejected") {
+      // Remove rejected request from both owner and borrower
+      owner.toolsLentOut = owner.toolsLentOut.filter(
+        (t) => !(t.tool.toString() === toolId && t.borrower.toString() === borrowerId)
+      );
+      borrower.toolsRequested = borrower.toolsRequested.filter((t) => t.tool.toString() !== toolId);
+    }
+      sendMail({
+        to: borrower.email,
+        subject: `Your Borrow Request for "${toolEntryOwner.tool}" is Rejected`,
+        text: `Sorry, your request to borrow "${toolEntryOwner.tool}" has been rejected.`,
+      })
+      .then(() => console.log(`Rejection email sent to ${borrower.email}`))
+      .catch(err => console.error("Error sending rejection email:", err));
 
     await owner.save();
     await borrower.save();
 
-    if (status === "approved") {
-      await Tool.findByIdAndUpdate(toolId, { available: false, borrowedBy: borrowerId });
-    }
+    
 
     res.status(200).json({ message: `Request ${status}` });
   } catch (err) {
@@ -135,10 +189,19 @@ router.delete("/:toolId", authenticateToken, async (req, res) => {
     const { toolId } = req.params;
     const tool = await Tool.findById(toolId);
     if (!tool) return res.status(404).json({ message: "Tool not found." });
-    if (tool.owner.toString() !== req.user.id) return res.status(403).json({ message: "You are not authorized to delete this tool." });
+    if (tool.owner.toString() !== req.user.id)
+      return res.status(403).json({ message: "You are not authorized to delete this tool." });
 
     await Tool.findByIdAndDelete(toolId);
+
+    // Remove from owner's toolsOwned
     await User.findByIdAndUpdate(req.user.id, { $pull: { toolsOwned: toolId } });
+
+    // Clean up any pending requests in other users
+    await User.updateMany(
+      {},
+      { $pull: { toolsRequested: { tool: toolId }, toolsLentOut: { tool: toolId } } }
+    );
 
     res.status(200).json({ message: "Tool deleted successfully." });
   } catch (err) {
@@ -147,8 +210,22 @@ router.delete("/:toolId", authenticateToken, async (req, res) => {
   }
 });
 
-// router.post("/return/:toolId",authenticateToken,async(req,res)=>{
+// -------------------- Request to return a tool --------------------
+router.post("/return/:toolId", authenticateToken, async (req, res) => {
+  try {
+    const tool = await Tool.findById(req.params.toolId);
+    if (!tool) return res.status(404).json({ message: "Tool not found" });
+    if (tool.borrowedBy?.toString() !== req.user.id)
+      return res.status(403).json({ message: "Not your borrowed tool" });
 
-// })
+    tool.returnRequested = true;
+    await tool.save();
+
+    res.status(200).json({ message: "Return request sent" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 module.exports = router;
