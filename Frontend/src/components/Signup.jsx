@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
-import { UserPlusIcon, EnvelopeIcon, LockClosedIcon } from "@heroicons/react/24/solid";
+import { UserPlusIcon, EnvelopeIcon, LockClosedIcon, MapPinIcon, PhoneIcon } from "@heroicons/react/24/solid"; // ⬅️ Added Icons
 
 const Signup = () => {
   const navigate = useNavigate();
@@ -9,6 +9,8 @@ const Signup = () => {
     name: "",
     email: "",
     password: "",
+    location: "", // ⬅️ NEW
+    phone: "",     // ⬅️ NEW
   });
   const [error, setError] = useState("");
 
@@ -19,6 +21,12 @@ const Signup = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    
+    // Basic frontend validation for new fields
+    if (!formData.location || !formData.phone) {
+        setError("Location and Phone are required.");
+        return;
+    }
 
     try {
       const { data } = await axios.post("http://localhost:3000/signup", formData);
@@ -58,62 +66,72 @@ const Signup = () => {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Name */}
             <div>
-              <label className="block text-gray-700 font-medium mb-2" htmlFor="name">
-                Name
-              </label>
+              <label className="block text-gray-700 font-medium mb-2" htmlFor="name">Name</label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
                   <UserPlusIcon className="h-5 w-5" />
                 </span>
                 <input
-                  type="text"
-                  id="name"
-                  name="name"
-                  className="w-full border border-gray-300 rounded-lg p-3 pl-10 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-shadow duration-300"
-                  value={formData.name}
-                  onChange={handleChange}
-                  required
+                  type="text" id="name" name="name" className="w-full border border-gray-300 rounded-lg p-3 pl-10 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-shadow duration-300"
+                  value={formData.name} onChange={handleChange} required
                 />
               </div>
             </div>
 
+            {/* Email */}
             <div>
-              <label className="block text-gray-700 font-medium mb-2" htmlFor="email">
-                Email
-              </label>
+              <label className="block text-gray-700 font-medium mb-2" htmlFor="email">Email</label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
                   <EnvelopeIcon className="h-5 w-5" />
                 </span>
                 <input
-                  type="email"
-                  id="email"
-                  name="email"
-                  className="w-full border border-gray-300 rounded-lg p-3 pl-10 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-shadow duration-300"
-                  value={formData.email}
-                  onChange={handleChange}
-                  required
+                  type="email" id="email" name="email" className="w-full border border-gray-300 rounded-lg p-3 pl-10 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-shadow duration-300"
+                  value={formData.email} onChange={handleChange} required
                 />
               </div>
             </div>
 
+            {/* Location ⬅️ NEW FIELD */}
             <div>
-              <label className="block text-gray-700 font-medium mb-2" htmlFor="password">
-                Password
-              </label>
+              <label className="block text-gray-700 font-medium mb-2" htmlFor="location">Location</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                  <MapPinIcon className="h-5 w-5" />
+                </span>
+                <input
+                  type="text" id="location" name="location" className="w-full border border-gray-300 rounded-lg p-3 pl-10 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-shadow duration-300"
+                  value={formData.location} onChange={handleChange} required
+                />
+              </div>
+            </div>
+
+            {/* Phone ⬅️ NEW FIELD */}
+            <div>
+              <label className="block text-gray-700 font-medium mb-2" htmlFor="phone">Phone</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                  <PhoneIcon className="h-5 w-5" />
+                </span>
+                <input
+                  type="tel" id="phone" name="phone" className="w-full border border-gray-300 rounded-lg p-3 pl-10 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-shadow duration-300"
+                  value={formData.phone} onChange={handleChange} required
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="block text-gray-700 font-medium mb-2" htmlFor="password">Password</label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
                   <LockClosedIcon className="h-5 w-5" />
                 </span>
                 <input
-                  type="password"
-                  id="password"
-                  name="password"
-                  className="w-full border border-gray-300 rounded-lg p-3 pl-10 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-shadow duration-300"
-                  value={formData.password}
-                  onChange={handleChange}
-                  required
+                  type="password" id="password" name="password" className="w-full border border-gray-300 rounded-lg p-3 pl-10 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-shadow duration-300"
+                  value={formData.password} onChange={handleChange} required
                 />
               </div>
             </div>

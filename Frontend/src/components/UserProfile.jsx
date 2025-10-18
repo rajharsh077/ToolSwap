@@ -5,6 +5,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
+// --- Custom Imports for Chat ---
+import ChatModal from './ChatModal'; 
+
 // --- Professional Icons from Heroicons ---
 import {
   ChevronDownIcon,
@@ -21,13 +24,12 @@ import {
   CalendarDaysIcon,
   ArrowUturnLeftIcon,
   ArchiveBoxIcon,
-  ArrowRightOnRectangleIcon,
   ExclamationTriangleIcon,
+  ChatBubbleBottomCenterTextIcon, // Icon for chat button
 } from "@heroicons/react/24/outline";
 
 // =================================================================================
-//  HELPER COMPONENTS FOR A CLEANER UI
-//  (Breaking the UI into smaller pieces makes the code much more readable)
+//  HELPER COMPONENTS
 // =================================================================================
 
 // --- Card for "Your Tools" Tab ---
@@ -83,8 +85,8 @@ const ListedToolCard = ({ tool, onToggle, onEdit, onDelete }) => {
   );
 };
 
-// --- Card for "Lent Out" Tab ---
-const LentOutCard = ({ tool }) => (
+// --- Card for "Lent Out" Tab (UPDATED with Chat Button) ---
+const LentOutCard = ({ tool, onMessage }) => (
   <div className="bg-white p-4 rounded-2xl shadow-lg transition-all hover:shadow-xl flex items-start gap-4 border-l-4 border-[#06C4B0]">
     <img src={tool.image || 'https://via.placeholder.com/50'} alt={tool.title} className="h-16 w-16 rounded-lg object-cover" />
     <div className="flex-1">
@@ -95,6 +97,12 @@ const LentOutCard = ({ tool }) => (
         <p className="flex items-center gap-2"><CalendarDaysIcon className="h-4 w-4 text-slate-400" /> Borrowed on: {tool.borrowedAt ? new Date(tool.borrowedAt).toLocaleDateString() : "N/A"}</p>
       </div>
     </div>
+    <button 
+      onClick={() => onMessage(tool)} 
+      className="flex items-center gap-1 text-sm font-semibold px-4 py-2 rounded-lg bg-[#1E3A8A] text-white hover:bg-[#15275a] transition-colors self-end"
+    >
+      <ChatBubbleBottomCenterTextIcon className="h-4 w-4" /> Message
+    </button>
   </div>
 );
 
@@ -167,8 +175,13 @@ const UserProfile = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editToolData, setEditToolData] = useState(null);
   const navigate = useNavigate();
+  
+  // ⬅️ CHAT STATE
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [targetChat, setTargetChat] = useState({ user: null, tool: null }); 
+  const [currentUserName, setCurrentUserName] = useState('');
 
-  // --- No changes to the logic, it remains solid! ---
+  // --- Data Fetching and Auth Validation ---
   useEffect(() => {
     const fetchProfileData = async () => {
       const token = localStorage.getItem("token");
@@ -181,24 +194,36 @@ const UserProfile = () => {
         const decoded = jwtDecode(token);
         currentUserId = decoded.id || decoded._id;
         setUserId(currentUserId);
+        setCurrentUserName(decoded.name || decoded.username); 
       } catch {
         toast.error("Invalid token. Please login again.");
         localStorage.removeItem("token");
         navigate("/login");
         return;
       }
+      
       const headers = { Authorization: `Bearer ${token}` };
+      
       try {
-        const [ownedRes, lentOutRes, borrowedRes, requestsRes] = await Promise.all([
-            axios.get(`http://localhost:3000/${name}/${currentUserId}`, { headers }),
+        // 1. Fetch Profile Data (Owned Tools, Basic Info)
+        const ownedRes = await axios.get(
+            `http://localhost:3000/${name}/profileData/${currentUserId}`, // ✅ NEW, SAFE ENDPOINT
+            { headers }
+        );
+        
+        // 2. Fetch Other Transaction Data concurrently
+        const [lentOutRes, borrowedRes, requestsRes] = await Promise.all([
             axios.get(`http://localhost:3000/${name}/${currentUserId}/lentOut`, { headers }),
             axios.get(`http://localhost:3000/tools/borrowed/${currentUserId}`, { headers }),
             axios.get(`http://localhost:3000/tools/requests/${currentUserId}`, { headers })
         ]);
+        
+        // Update state based on new API responses
         setLentTools(ownedRes.data.toolsOwned || []);
         setToolsWithBorrowers(lentOutRes.data || []);
         setBorrowedTools(borrowedRes.data || []);
         setRequests(requestsRes.data || []);
+        
       } catch (error) {
         console.error(error);
         toast.error("Failed to load profile data.");
@@ -206,6 +231,22 @@ const UserProfile = () => {
     };
     fetchProfileData();
   }, [navigate, name]);
+  
+  // ⬅️ Handler: Open chat modal
+  const handleOpenChat = (tool) => {
+    // Only allow chat if tool has a borrower (i.e., is lent out)
+    if (!tool.borrowedBy) {
+      toast.error("Tool is not currently lent out.");
+      return;
+    }
+    setTargetChat({ 
+      user: { id: tool.borrowedBy._id, name: tool.borrowedBy.name, phone: tool.borrowedBy.phone }, // Borrower details
+      tool: { id: tool._id, title: tool.title } 
+    });
+    setIsChatOpen(true);
+  };
+  
+  // --- Tool Management Handlers ---
   
   const handleAvailabilityToggle = async (toolId, currentStatus) => {
     const token = localStorage.getItem("token");
@@ -241,13 +282,10 @@ const UserProfile = () => {
     if (!confirmed) return;
 
     try {
-      // Send the return request to the backend
       await axios.post(`http://localhost:3000/tools/return/${toolId}`, {}, { headers: { Authorization: `Bearer ${token}` } });
       toast.success(`Return request sent for "${toolTitle}"!`);
-
-      // Immediately update the UI by removing the tool from the borrowed list
+      // Optimistically update UI
       setBorrowedTools(prevTools => prevTools.filter(tool => tool._id !== toolId));
-
     } catch (err) {
       console.error(err);
       toast.error("Failed to send return request.");
@@ -277,8 +315,8 @@ const UserProfile = () => {
       if (reqObj.status === "approved") {
         toast.success("Request approved!");
         // Refresh lent-out tools list
-          const lentOutRes = await axios.get(`http://localhost:3000/${name}/${userId}/lentOut`, { headers: { Authorization: `Bearer ${token}` } });
-          setToolsWithBorrowers(lentOutRes.data);
+        const lentOutRes = await axios.get(`http://localhost:3000/${name}/${userId}/lentOut`, { headers: { Authorization: `Bearer ${token}` } });
+        setToolsWithBorrowers(lentOutRes.data);
       } else {
         toast.info("Request rejected!");
       }
@@ -287,6 +325,7 @@ const UserProfile = () => {
     }
   };
 
+  // --- Content Renderer ---
   const renderContent = () => {
     switch (activeTab) {
       case "listed":
@@ -303,7 +342,7 @@ const UserProfile = () => {
         return toolsWithBorrowers.length > 0 ? (
           <div className="space-y-4">
             {toolsWithBorrowers.map((tool) => (
-              <LentOutCard key={tool._id} tool={tool} />
+              <LentOutCard key={tool._id} tool={tool} onMessage={handleOpenChat} />
             ))}
           </div>
         ) : (
@@ -405,6 +444,15 @@ const UserProfile = () => {
           </div>
         </div>
       )}
+      
+      {/* --- Chat Modal --- */}
+      <ChatModal
+          isOpen={isChatOpen}
+          onClose={() => setIsChatOpen(false)}
+          currentUser={{ id: userId, name: currentUserName }}
+          targetUser={targetChat.user}
+          targetTool={targetChat.tool}
+      />
     </div>
   );
 };

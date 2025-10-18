@@ -1,10 +1,11 @@
 const express = require("express");
 const router = express.Router({ mergeParams: true });
 const toolModel = require("../models/tool");
-const userModel = require("../models/users"); // 🔧 Import user model
+const userModel = require("../models/users");
 const { authenticateToken } = require("../middlewares/AuthMiddleware");
 
-// 🛠 Add a new tool
+// -------------------- 🛠 Add a new tool --------------------
+// Path: /:name/addTool
 router.post("/addTool", authenticateToken, async (req, res) => {
   try {
     const { title, description, category, image, location, available } = req.body;
@@ -21,7 +22,6 @@ router.post("/addTool", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "You are not authorized to add tool for this user." });
     }
 
-    // ✅ Save tool
     const newTool = new toolModel({
       title,
       description,
@@ -34,7 +34,6 @@ router.post("/addTool", authenticateToken, async (req, res) => {
 
     const savedTool = await newTool.save();
 
-    // ✅ Update user's toolsOwned
     await userModel.findByIdAndUpdate(owner, {
       $push: { toolsOwned: savedTool._id },
     });
@@ -47,25 +46,48 @@ router.post("/addTool", authenticateToken, async (req, res) => {
   }
 });
 
-
-
-router.get("/:userId", authenticateToken, async (req, res) => {
-  const user = await userModel.findById(req.params.userId).populate("toolsOwned");
-  res.json(user);
+// -------------------- ✅ NEW: Get User Profile Data --------------------
+// This replaces the conflicting router.get("/:userId") route.
+// Path: /:name/profileData
+router.get("/profileData/:userId", authenticateToken, async (req, res) => {
+    try {
+        const user = await userModel.findById(req.params.userId).populate("toolsOwned");
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        
+        // This is the data the UserProfile page needs for the 'Listed' tab and user info
+        res.json({
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            toolsOwned: user.toolsOwned // Array of populated tool documents
+        });
+    } catch (err) {
+        console.error("Error fetching user profile data:", err);
+        res.status(500).json({ message: "Server error fetching user profile data" });
+    }
 });
 
 
-router.get("/:userId/lentOut", async (req, res) => {
+// -------------------- Get lent out tools --------------------
+// Path: /:name/:userId/lentOut
+router.get("/:userId/lentOut", authenticateToken, async (req, res) => {
   try {
     const { userId } = req.params;
+    
+    // Authorization check: Ensure token user ID matches route user ID
+    if (req.user.id !== userId) {
+        return res.status(403).json({ message: "Unauthorized access to lent out tools" });
+    }
 
-    // Find tools owned by this user that are lent out (borrowedBy not null)
+    // Find tools owned by this user that are currently lent out
     const lentOutTools = await toolModel.find({ owner: userId, borrowedBy: { $ne: null } })
-      .populate("borrowedBy", "name phone"); // populate borrower info
+      .populate("borrowedBy", "name phone"); 
 
     res.status(200).json(lentOutTools);
   } catch (error) {
-    console.error(error);
+    console.error("Error fetching lent out tools:", error);
     res.status(500).json({ message: "Failed to fetch lent out tools" });
   }
 });
