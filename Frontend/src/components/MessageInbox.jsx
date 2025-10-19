@@ -32,11 +32,13 @@ const MessageInbox = () => {
   );
 
   // -------------------------------
-  // Load badges from localStorage on mount
+  // Load badges from localStorage
   // -------------------------------
   useEffect(() => {
     const stored = localStorage.getItem('newMessageIds');
-    if (stored) setNewMessageIds(JSON.parse(stored));
+    if (stored) {
+      setNewMessageIds(JSON.parse(stored));
+    }
   }, []);
 
   // -------------------------------
@@ -147,14 +149,13 @@ const MessageInbox = () => {
         );
       });
 
-      // ONLY add to newMessageIds if currentUser is the RECEIVER
-      if (data.senderId !== currentUser.id) {
+      // Track new messages only if conversation is not active and not sent by current user
+      if (data.senderId !== currentUser.id && (!activeConversation || activeConversation._id !== conversationId)) {
         setNewMessageIds((prev) => {
           const updated = {
             ...prev,
             [conversationId]: [...(prev[conversationId] || []), data._id || Date.now()],
           };
-          // Save to localStorage
           localStorage.setItem('newMessageIds', JSON.stringify(updated));
           return updated;
         });
@@ -209,7 +210,7 @@ const MessageInbox = () => {
     setNewMessageIds((prev) => {
       const updated = { ...prev };
       delete updated[conv._id];
-      localStorage.setItem('newMessageIds', JSON.stringify(updated)); // <-- update localStorage
+      localStorage.setItem('newMessageIds', JSON.stringify(updated));
       return updated;
     });
   };
