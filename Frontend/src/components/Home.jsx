@@ -1256,7 +1256,7 @@ const Home = () => {
           <div>
             <h4 className="font-bold text-white text-sm mb-4">Contact Support</h4>
             <p className="text-xs text-slate-400">Email: support@toolshare.com</p>
-            <p className="text-xs text-slate-400 mt-2">Location: Delhi NCR, India</p>
+            <p className="text-xs text-slate-400 mt-2">Location: Bihar, India</p>
           </div>
         </div>
         <p className="text-center text-slate-650 mt-12 text-xs">
