@@ -34,6 +34,45 @@ const userSchema = new mongoose.Schema({
     default: ""
   },
 
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
+
+  isSuspended: {
+    type: Boolean,
+    default: false
+  },
+
+  isBanned: {
+    type: Boolean,
+    default: false
+  },
+
+  warnCount: {
+    type: Number,
+    default: 0
+  },
+
+  notifications: [
+    {
+      title: String,
+      message: String,
+      type: {
+        type: String,
+        default: "info"
+      },
+      isRead: {
+        type: Boolean,
+        default: false
+      },
+      createdAt: {
+        type: Date,
+        default: Date.now
+      }
+    }
+  ],
+
   rating: {
     type: Number,
     default: 0

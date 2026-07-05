@@ -6,6 +6,9 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+      },
       keyframes: {
         "slide-up-fade": {
           "0%": { opacity: "0", transform: "translateY(20px)" },

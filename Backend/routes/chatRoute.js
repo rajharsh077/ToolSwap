@@ -11,7 +11,7 @@ router.get("/conversations", authenticateToken, async (req, res) => {
         const conversations = await Conversation.find({
             participants: userId,
         })
-        .populate("participants", "name email profileImage")
+        .populate("participants", "name email profileImage location rating numReviews")
         .populate("tool", "title image")
         .populate({ // ⬅️ NEW: Populate the sender for the messages
             path: 'messages.sender',
@@ -39,7 +39,7 @@ router.get("/:toolId/:otherUserId", authenticateToken, async (req, res) => {
             tool: toolId,
             participants: { $all: [currentUserId, otherUserId] }
         })
-        .populate("participants", "name profileImage")
+        .populate("participants", "name profileImage location rating numReviews")
         .populate("tool", "title")
         .populate({ // ⬅️ NEW: Populate the sender for messages history
             path: 'messages.sender',
@@ -100,6 +100,43 @@ router.post("/message", authenticateToken, async (req, res) => {
     } catch (err) {
         console.error("Error saving message:", err);
         res.status(500).json({ message: "Server error saving message" });
+    }
+});
+
+// -------------------- Mark messages in a conversation as read --------------------
+router.put("/:conversationId/read", authenticateToken, async (req, res) => {
+    try {
+        const { conversationId } = req.params;
+        const currentUserId = req.user.id;
+
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation) {
+            return res.status(404).json({ message: "Conversation not found" });
+        }
+
+        // Check if the current user is a participant
+        if (!conversation.participants.some(p => p.toString() === currentUserId)) {
+            return res.status(403).json({ message: "Not authorized to access this conversation" });
+        }
+
+        // Mark messages not sent by current user as read
+        let updated = false;
+        conversation.messages.forEach(msg => {
+            const senderId = msg.sender?._id || msg.sender;
+            if (senderId && senderId.toString() !== currentUserId && !msg.isRead) {
+                msg.isRead = true;
+                updated = true;
+            }
+        });
+
+        if (updated) {
+            await conversation.save();
+        }
+
+        res.json({ message: "Messages marked as read" });
+    } catch (err) {
+        console.error("Error marking messages read:", err);
+        res.status(500).json({ message: "Server error" });
     }
 });
 

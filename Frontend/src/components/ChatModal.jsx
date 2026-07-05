@@ -4,11 +4,11 @@ import { XMarkIcon, PaperAirplaneIcon, ChatBubbleBottomCenterTextIcon } from '@h
 import io from 'socket.io-client';
 import { toast } from 'react-toastify';
 import { useChat } from '../context/ChatContext';
+import { socketUrl, apiBaseUrl } from '../config';
 
-const socket = io('http://localhost:3000');
+const socket = io(socketUrl);
 
 const ChatModal = ({ isOpen, onClose, currentUser, targetUser, targetTool }) => {
-    // --- Hooks always run unconditionally ---
     const [conversation, setConversation] = useState(null);
     const [messages, setMessages] = useState([]);
     const [inputMessage, setInputMessage] = useState('');
@@ -33,7 +33,7 @@ const ChatModal = ({ isOpen, onClose, currentUser, targetUser, targetTool }) => 
 
             try {
                 const res = await axios.get(
-                    `http://localhost:3000/chat/${targetTool.id}/${targetUser.id}`,
+                    `${apiBaseUrl}/chat/${targetTool.id}/${targetUser.id}`,
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
 
@@ -47,6 +47,22 @@ const ChatModal = ({ isOpen, onClose, currentUser, targetUser, targetTool }) => 
                 })));
 
                 socket.emit('join_room', currentUser.id);
+
+                await axios.put(`${apiBaseUrl}/chat/${conv._id}/read`, {}, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+
+                let unreadInConv = 0;
+                conv.messages.forEach(msg => {
+                    const senderId = msg.sender?._id || msg.sender;
+                    if (senderId && senderId.toString() !== currentUser.id && !msg.isRead) {
+                        unreadInConv++;
+                    }
+                });
+
+                if (unreadInConv > 0) {
+                    updateUnreadCount(prev => Math.max(0, prev - unreadInConv));
+                }
             } catch (error) {
                 toast.error("Failed to load chat history.");
                 console.error(error);
@@ -64,33 +80,46 @@ const ChatModal = ({ isOpen, onClose, currentUser, targetUser, targetTool }) => 
 
         const handleReceiveMessage = (data) => {
             if (data.conversationId === conversation._id) {
-                setMessages(prev => [...prev, data]);
+                setMessages(prev => {
+                    const isDuplicate = prev.some(msg => 
+                        msg.senderId === data.senderId && 
+                        msg.message === data.message && 
+                        Math.abs(new Date(msg.timestamp) - new Date(data.timestamp)) < 5000
+                    );
+                    if (isDuplicate) return prev;
+                    return [...prev, data];
+                });
                 setConversation(prev => ({ ...prev, lastMessageAt: data.timestamp }));
 
                 if (data.senderId !== currentUser.id) {
-                    updateUnreadCount(prev => prev + 1);
+                    axios.put(`${apiBaseUrl}/chat/${conversation._id}/read`, {}, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    }).catch(err => console.error("Error marking msg read in modal socket:", err));
                 }
             }
         };
 
         socket.on('receive_message', handleReceiveMessage);
         return () => socket.off('receive_message', handleReceiveMessage);
-    }, [conversation, currentUser.id, updateUnreadCount]);
+    }, [conversation, currentUser?.id, updateUnreadCount]);
 
     // --- Scroll to bottom ---
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages, isLoading]);
 
-    // --- JSX rendering ---
     if (!isOpen) return null;
 
     if (isDataMissing) {
         return (
-            <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
-                <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-md">
-                    <p className="text-red-500">Required user/tool data is missing.</p>
-                    <button onClick={onClose} className="mt-4 bg-gray-200 p-2 rounded-full">Close</button>
+            <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md border border-slate-100 animate-slide-up-fade text-center text-xs font-semibold">
+                    <div className="text-4xl mb-3">⚠️</div>
+                    <p className="text-rose-600 font-bold text-sm mb-1.5">Missing Connection Info</p>
+                    <p className="text-slate-400 mb-6 leading-relaxed">Cannot open conversation room without verification details.</p>
+                    <button onClick={onClose} className="bg-indigo-600 text-white px-6 py-2.5 rounded-full hover:bg-indigo-750 transition-all font-bold shadow-md shadow-indigo-600/10">
+                        Close Modal
+                    </button>
                 </div>
             </div>
         );
@@ -111,7 +140,6 @@ const ChatModal = ({ isOpen, onClose, currentUser, targetUser, targetTool }) => 
         };
 
         socket.emit('send_message', messageData);
-
         setMessages(prev => [...prev, { ...messageData, _id: Date.now() }]);
         setInputMessage('');
     };
@@ -119,40 +147,54 @@ const ChatModal = ({ isOpen, onClose, currentUser, targetUser, targetTool }) => 
     const formatTime = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg h-[80vh] flex flex-col relative">
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg h-[75vh] flex flex-col relative border border-slate-100 overflow-hidden animate-slide-up-fade">
                 {/* Header */}
-                <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50 rounded-t-2xl">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-white">
                     <div className="flex flex-col">
-                        <h3 className="text-xl font-bold">{targetUser.name}</h3>
-                        <p className="text-sm text-slate-500">
-                            <ChatBubbleBottomCenterTextIcon className="h-4 w-4 inline mr-1" />
-                            Conversation about: {targetTool.title}
+                        <h3 className="text-sm font-bold text-slate-800">{targetUser.name}</h3>
+                        <p className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1 font-semibold">
+                          <ChatBubbleBottomCenterTextIcon className="h-3.5 w-3.5 text-indigo-500" />
+                          <span>Regarding:</span>
+                          <span className="font-bold text-indigo-650">{targetTool.title}</span>
                         </p>
                     </div>
-                    <button onClick={onClose} className="text-slate-500 hover:text-slate-800 p-2">
-                        <XMarkIcon className="h-6 w-6" />
+                    <button onClick={onClose} className="rounded-full p-2 bg-slate-50 text-slate-400 hover:text-slate-700 transition-all">
+                        <XMarkIcon className="h-5 w-5" />
                     </button>
                 </div>
 
                 {isLoading ? (
-                    <div className="flex-1 flex items-center justify-center text-slate-600">
-                        Loading chat history...
+                    <div className="flex-1 flex flex-col items-center justify-center text-slate-500 space-y-3 text-xs font-semibold">
+                        <div className="relative w-10 h-10">
+                            <div className="absolute inset-0 bg-indigo-100 rounded-full animate-pulse"></div>
+                            <div className="absolute inset-1.5 bg-indigo-200 rounded-full animate-pulse" style={{ animationDelay: "0.2s" }}></div>
+                            <div className="absolute inset-3 bg-indigo-600 rounded-full animate-pulse" style={{ animationDelay: "0.4s" }}></div>
+                        </div>
+                        <p>Loading messages...</p>
                     </div>
                 ) : (
                     <>
                         {/* Messages */}
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                            {messages.length === 0 && <div className="text-center text-slate-500 pt-10">No messages yet.</div>}
+                        <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-50/50">
+                            {messages.length === 0 && (
+                                <div className="flex items-center justify-center h-full text-center text-slate-400 text-xs font-medium">
+                                    <div>
+                                        <ChatBubbleBottomCenterTextIcon className="h-10 w-10 mx-auto mb-2 text-slate-350 animate-pulse" />
+                                        <p className="font-bold">No message history</p>
+                                        <p className="text-[10px] text-slate-400 mt-0.5">Send a quick message to negotiate details!</p>
+                                    </div>
+                                </div>
+                            )}
                             {messages.map((msg, i) => {
                                 const isCurrentUser = msg.senderId === currentUser.id;
                                 return (
-                                    <div key={msg._id || i} className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
-                                        <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-xl text-sm shadow-md ${
-                                            isCurrentUser ? 'bg-[#06B6D4] text-white rounded-br-none' : 'bg-gray-200 text-slate-800 rounded-tl-none'
+                                    <div key={msg._id || i} className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+                                        <div className={`max-w-xs px-4 py-2.5 rounded-2xl text-xs shadow-sm transition-all break-words ${
+                                            isCurrentUser ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white border border-slate-100 text-slate-800 rounded-tl-none'
                                         }`}>
-                                            {msg.message}
-                                            <span className="block text-[10px] opacity-80 mt-1 text-right">{formatTime(msg.timestamp)}</span>
+                                            <p className="leading-relaxed">{msg.message}</p>
+                                            <span className={`block text-[8px] mt-1 text-right ${isCurrentUser ? 'opacity-80' : 'opacity-40 text-slate-500'}`}>{formatTime(msg.timestamp)}</span>
                                         </div>
                                     </div>
                                 );
@@ -161,16 +203,16 @@ const ChatModal = ({ isOpen, onClose, currentUser, targetUser, targetTool }) => 
                         </div>
 
                         {/* Input */}
-                        <form onSubmit={handleSend} className="p-4 border-t border-gray-200 flex gap-3">
+                        <form onSubmit={handleSend} className="p-4 border-t border-slate-100 flex gap-2.5 bg-white">
                             <input
                                 type="text"
-                                placeholder="Write your message..."
+                                placeholder="Type your message..."
                                 value={inputMessage}
                                 onChange={(e) => setInputMessage(e.target.value)}
-                                className="flex-1 p-3 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-[#06B6D4]"
+                                className="flex-1 px-5 py-3 border border-slate-200 bg-slate-50 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs shadow-inner"
                             />
-                            <button type="submit" disabled={inputMessage.trim() === ''} className="bg-[#1E3A8A] text-white p-3 rounded-full hover:bg-[#15275a]">
-                                <PaperAirplaneIcon className="h-6 w-6 transform rotate-45" />
+                            <button type="submit" disabled={inputMessage.trim() === ''} className="bg-indigo-600 text-white p-3 rounded-full hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-400 transition-all flex items-center justify-center shadow-md shadow-indigo-600/10">
+                                <PaperAirplaneIcon className="h-5 w-5" />
                             </button>
                         </form>
                     </>

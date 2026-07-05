@@ -17,15 +17,21 @@ const Conversation = require("./models/chat");
 // Middleware
 const { generateToken, authenticateToken } = require("./middlewares/AuthMiddleware");
 
+const HARD_CODED_ADMIN_EMAIL = "admin@toolswap.com";
+const HARD_CODED_ADMIN_PASSWORD = "admin1234";
+
 // Routes
 const userRoute = require("./routes/userRoute");
 const toolRoute = require("./routes/toolsRoute");
 const chatRoute = require("./routes/chatRoute");
 
 dbConnection();
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(cors({
+  origin: process.env.FRONTEND_URL || "http://localhost:5173",
+  credentials: true,
+}));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // ------------------- SOCKET.IO -------------------
 const io = new Server(server, {
@@ -85,6 +91,7 @@ io.on('connection', (socket) => {
           message,
           tool: toolId,
           timestamp: new Date(),
+          isRead: false,
         };
         conversation.messages.push(newMessage);
         conversation.lastMessageAt = new Date();
@@ -95,6 +102,7 @@ io.on('connection', (socket) => {
           ...data,
           _id: savedMessage._id,
           timestamp: savedMessage.timestamp,
+          isRead: false,
         };
 
         io.to(receiverId).emit('receive_message', broadcastData);
@@ -128,11 +136,20 @@ app.get("/", (req, res) => {
 app.post("/signup", async (req, res) => {
   try {
     const { name, email, password, location, phone } = req.body;
-    const existingUser = await userModel.findOne({ email });
+    const normalizedEmail = (email || "").toLowerCase();
+    const existingUser = await userModel.findOne({ email: normalizedEmail });
     if (existingUser) return res.status(400).json({ message: "User already exists" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user = await userModel.create({ name, email, password: hashedPassword, location, phone });
+    const isAdminAccount = normalizedEmail === HARD_CODED_ADMIN_EMAIL.toLowerCase() && password === HARD_CODED_ADMIN_PASSWORD;
+    const user = await userModel.create({
+      name,
+      email: normalizedEmail,
+      password: hashedPassword,
+      location,
+      phone,
+      isAdmin: isAdminAccount,
+    });
 
     res.status(201).json({ message: "User registered successfully", user });
   } catch (err) {
@@ -144,8 +161,30 @@ app.post("/signup", async (req, res) => {
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await userModel.findOne({ email });
+    const normalizedEmail = (email || "").toLowerCase();
+
+    let user = await userModel.findOne({ email: normalizedEmail });
+
+    if (normalizedEmail === HARD_CODED_ADMIN_EMAIL.toLowerCase() && password === HARD_CODED_ADMIN_PASSWORD) {
+      if (!user) {
+        const hashedPassword = await bcrypt.hash(HARD_CODED_ADMIN_PASSWORD, 10);
+        user = await userModel.create({
+          name: "Admin",
+          email: normalizedEmail,
+          password: hashedPassword,
+          location: "Admin",
+          phone: "0000000000",
+          isAdmin: true,
+        });
+      } else if (!user.isAdmin) {
+        user.isAdmin = true;
+        await user.save();
+      }
+    }
+
     if (!user) return res.status(404).json({ message: "User not found" });
+    if (user.isBanned) return res.status(403).json({ message: "Your account has been banned" });
+    if (user.isSuspended) return res.status(403).json({ message: "Your account has been suspended" });
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
@@ -160,6 +199,10 @@ app.post("/login", async (req, res) => {
         email: user.email,
         location: user.location,
         phone: user.phone,
+        isVerified: user.isVerified,
+        isAdmin: user.isAdmin,
+        isSuspended: user.isSuspended,
+        isBanned: user.isBanned,
       },
     });
   } catch (err) {
@@ -186,7 +229,7 @@ app.get("/me", authenticateToken, async (req, res) => {
 app.get("/tools", async (req, res) => {
   try {
     const tools = await toolModel.find({ available: true })
-      .populate("owner", "phone rating numReviews name location profileImage");
+      .populate("owner", "phone rating numReviews name location profileImage isVerified");
     res.json(tools);
   } catch (error) {
     console.error("Error fetching tools:", error);
@@ -194,7 +237,96 @@ app.get("/tools", async (req, res) => {
   }
 });
 
+app.get("/stats", async (req, res) => {
+  try {
+    const totalUsers = await userModel.countDocuments();
+    const availableTools = await toolModel.countDocuments({ available: true, isFlagged: { $ne: true } });
+    
+    const categories = await toolModel.distinct("category");
+    const totalCategories = categories.length;
+
+    // Calculate successful borrows count
+    const borrowStats = await userModel.aggregate([
+      { $unwind: "$toolsLentOut" },
+      { $match: { "toolsLentOut.status": { $in: ["approved", "returned"] } } },
+      { $count: "count" }
+    ]);
+    const successfulBorrows = borrowStats.length > 0 ? borrowStats[0].count : 0;
+
+    res.json({
+      totalUsers,
+      availableTools,
+      totalCategories,
+      successfulBorrows
+    });
+  } catch (error) {
+    console.error("Error fetching stats:", error);
+    res.status(500).json({ message: "Error fetching stats" });
+  }
+});
+
+app.get("/users/top-lenders", async (req, res) => {
+  try {
+    const topLenders = await userModel.find({ isSuspended: false, isBanned: false, isAdmin: { $ne: true } })
+      .select("name email profileImage rating numReviews toolsLentOut isVerified")
+      .sort({ rating: -1 })
+      .limit(6);
+
+    const formattedLenders = topLenders.map(user => {
+      const successfulLendsCount = user.toolsLentOut.filter(t => t.status === "approved" || t.status === "returned").length;
+      return {
+        _id: user._id,
+        name: user.name,
+        profileImage: user.profileImage,
+        rating: user.rating || 0,
+        numReviews: user.numReviews || 0,
+        isVerified: user.isVerified || false,
+        lendsCount: successfulLendsCount
+      };
+    });
+
+    res.json(formattedLenders);
+  } catch (error) {
+    console.error("Error fetching top lenders:", error);
+    res.status(500).json({ message: "Error fetching top lenders" });
+  }
+});
+
+app.get("/tools/reviews/latest", async (req, res) => {
+  try {
+    const toolsWithReviews = await toolModel.find({ "reviews.0": { $exists: true } })
+      .populate("reviews.borrower", "name profileImage")
+      .populate("owner", "name")
+      .select("title reviews owner");
+
+    let allReviews = [];
+    toolsWithReviews.forEach(tool => {
+      tool.reviews.forEach(review => {
+        allReviews.push({
+          _id: review._id,
+          rating: review.rating,
+          comment: review.comment,
+          createdAt: review.createdAt,
+          borrowerName: review.borrower?.name || "Anonymous User",
+          borrowerInitial: review.borrower?.name ? review.borrower.name[0].toUpperCase() : "A",
+          toolTitle: tool.title,
+          ownerName: tool.owner?.name || "Owner"
+        });
+      });
+    });
+
+    allReviews.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const latestReviews = allReviews.slice(0, 6);
+
+    res.json(latestReviews);
+  } catch (error) {
+    console.error("Error fetching latest reviews:", error);
+    res.status(500).json({ message: "Error fetching latest reviews" });
+  }
+});
+
 // ------------------- SERVER -------------------
-server.listen(3000, () => {
-  console.log("🚀 Server started on port 3000");
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`🚀 Server started on port ${PORT}`);
 });

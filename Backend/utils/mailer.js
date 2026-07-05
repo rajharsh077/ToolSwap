@@ -15,7 +15,7 @@ const transporter = nodemailer.createTransport({
 const sendMail = async ({ to, subject, text, html }) => {
   try {
     await transporter.sendMail({
-      from: `"ToolSwap" <${process.env.EMAIL_USER}>`,
+      from: `"ToolShare" <${process.env.EMAIL_USER}>`,
       to,
       subject,
       text,

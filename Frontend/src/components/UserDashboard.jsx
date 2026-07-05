@@ -1,15 +1,18 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useNavigate, useParams, NavLink } from "react-router-dom";
-import {jwtDecode} from "jwt-decode";
+import { jwtDecode } from "jwt-decode";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css"; 
 
 // --- Custom Chat Imports ---
 import ChatModal from './ChatModal'; 
+import NotificationMenu from './NotificationMenu';
+import Navbar from './Navbar';
 import { useChat } from '../context/ChatContext'; 
 
 // --- Heroicons ---
+import { apiBaseUrl } from "../config";
 import {
   WrenchScrewdriverIcon,
   UserCircleIcon,
@@ -17,7 +20,6 @@ import {
   PlusIcon,
   MagnifyingGlassIcon,
   MapPinIcon,
-  XMarkIcon,
   PhoneIcon,
   StarIcon,
   CheckCircleIcon,
@@ -26,25 +28,32 @@ import {
   HandRaisedIcon,
   ChatBubbleBottomCenterTextIcon,
   ChatBubbleLeftRightIcon,
+  TrophyIcon,
 } from "@heroicons/react/24/outline";
-
 
 const UserDashboard = () => {
   const [tools, setTools] = useState([]);
   const [filteredTools, setFilteredTools] = useState([]);
+  const [locationLabels, setLocationLabels] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
   const [name, setName] = useState("");
-  const [userId, setUserId] = useState(null);
-  const [selectedTool, setSelectedTool] = useState(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [targetChat, setTargetChat] = useState({ user: null, tool: null });
+  const [requestedToolIds, setRequestedToolIds] = useState([]);
   const [currentUserData, setCurrentUserData] = useState({ id: null, name: '' });
   const [isDataInitialized, setIsDataInitialized] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState("all");
+
+  const categories = useMemo(() => {
+    const unique = [...new Set(tools.map((t) => t.category).filter(Boolean))];
+    return ["all", ...unique.sort()];
+  }, [tools]);
 
   const navigate = useNavigate();
   const { name: routeName } = useParams();
-  const { unreadCount } = useChat();
+  const { unreadCount, requestCount } = useChat();
 
   // --- Authentication & Data Fetch ---
   useEffect(() => {
@@ -76,19 +85,19 @@ const UserDashboard = () => {
       return;
     }
 
-    // Fetch tools only once
     if (!isDataInitialized) {
       const fetchTools = async () => {
         try {
-          const res = await axios.get("http://localhost:3000/tools", {
+          const res = await axios.get(`${apiBaseUrl}/tools`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          const othersTools = res.data.filter(
-            (tool) => tool.owner?._id !== decodedUserId
-          );
+          const othersTools = res.data.filter((tool) => {
+            const ownerId = tool.owner?._id || tool.owner;
+            if (!ownerId || !decodedUserId) return true;
+            return ownerId.toString().toLowerCase() !== decodedUserId.toString().toLowerCase();
+          });
           setTools(othersTools);
           setFilteredTools(othersTools);
-          setUserId(decodedUserId);
           setName(tokenUsername);
           setCurrentUserData({ id: decodedUserId, name: tokenUsername });
           setIsDataInitialized(true);
@@ -100,36 +109,108 @@ const UserDashboard = () => {
       fetchTools();
     }
 
-    // Navigate to correct route after initialization
     if (isDataInitialized && tokenUsername !== routeName) {
       navigate(`/${tokenUsername}`, { replace: true });
     }
 
   }, [navigate, routeName, isDataInitialized]);
 
-  // --- Search & Location Filter ---
   useEffect(() => {
-    let filtered = tools;
-    if (searchTerm) {
-      filtered = filtered.filter((tool) =>
-        tool.title.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-    if (locationFilter) {
-      filtered = filtered.filter((tool) =>
-        tool.location.toLowerCase().includes(locationFilter.toLowerCase())
-      );
-    }
-    setFilteredTools(filtered);
-  }, [searchTerm, locationFilter, tools]);
+    const resolveLocationLabels = async () => {
+      const labels = {};
 
-  // --- Handlers ---
+      for (const tool of tools) {
+        const location = tool.location;
+        if (typeof location === "string") {
+          labels[tool._id] = location;
+          continue;
+        }
+        if (!location) {
+          labels[tool._id] = "Location provided";
+          continue;
+        }
+        if (location.address || location.placeName) {
+          labels[tool._id] = location.address || location.placeName;
+          continue;
+        }
+        if (location.lat != null && location.lng != null) {
+          try {
+            const response = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${location.lat}&lon=${location.lng}`
+            );
+            const data = await response.json();
+            labels[tool._id] = data.display_name || "Location provided";
+          } catch {
+            labels[tool._id] = "Location provided";
+          }
+        }
+      }
+      setLocationLabels((prev) => ({ ...prev, ...labels }));
+    };
+
+    if (tools.length) {
+      resolveLocationLabels();
+    }
+  }, [tools]);
+
+  // --- Filtering & Sorting ---
+  useEffect(() => {
+    let result = [...tools];
+
+    if (selectedCategory !== "all") {
+      result = result.filter((t) => t.category === selectedCategory);
+    }
+
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      result = result.filter(
+        (t) =>
+          t.title.toLowerCase().includes(term) ||
+          t.description.toLowerCase().includes(term)
+      );
+    }
+
+    if (locationFilter.trim()) {
+      const locTerm = locationFilter.toLowerCase();
+      result = result.filter((t) => {
+        const text = locationLabels[t._id] || "";
+        return text.toLowerCase().includes(locTerm);
+      });
+    }
+
+    if (sortBy === "newest") {
+      result.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    } else if (sortBy === "oldest") {
+      result.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    }
+
+    setFilteredTools(result);
+  }, [searchTerm, locationFilter, sortBy, tools, locationLabels, selectedCategory]);
+
+  const resetFilters = () => {
+    setSearchTerm("");
+    setLocationFilter("");
+    setSortBy("newest");
+    setSelectedCategory("all");
+  };
+
   const handleOpenChat = (tool) => {
-    setTargetChat({ 
-      user: { id: tool.owner._id, name: tool.owner.name },
-      tool: { id: tool._id, title: tool.title } 
+    if (!currentUserData.id) {
+      toast.error("User not verified.");
+      return;
+    }
+    setTargetChat({
+      user: { id: tool.owner?._id, name: tool.owner?.name },
+      tool: { id: tool._id, title: tool.title },
     });
     setIsChatOpen(true);
+  };
+
+  const getLocationText = (location, toolId) => {
+    if (typeof location === "string") return location;
+    if (!location) return "Location provided";
+    if (location.address || location.placeName) return location.address || location.placeName;
+    return locationLabels[toolId] || "Location provided";
   };
 
   const handleLend = async (toolId) => {
@@ -140,13 +221,15 @@ const UserDashboard = () => {
     const token = localStorage.getItem("token");
     try {
       await axios.post(
-        `http://localhost:3000/tools/request/${toolId}`,
+        `${apiBaseUrl}/tools/request/${toolId}`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      setRequestedToolIds((prev) => [...prev, toolId]);
       toast.success("✅ Request Sent to the owner!");
-    } catch {
-      toast.error("❌ Failed to send request.");
+    } catch (err) {
+      const message = err.response?.data?.message || "❌ Failed to send request.";
+      toast.error(message);
     }
   };
 
@@ -155,152 +238,198 @@ const UserDashboard = () => {
     navigate("/");
   };
 
-  const navLinkStyle = "flex items-center gap-2 text-slate-600 font-semibold px-4 py-2 rounded-lg hover:bg-slate-100 transition-colors relative";
-  const activeNavLinkStyle = "bg-slate-100 text-slate-800";
+  const activeNavLinkStyle = "bg-indigo-50 text-indigo-600 border border-indigo-100/50 shadow-sm";
 
   return (
-    <div className="min-h-screen bg-gray-50 text-slate-800">
-      {/* NAVBAR */}
-      <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-lg border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
-              <WrenchScrewdriverIcon className="h-8 w-8 text-[#06B6D4]" />
-              <h1 className="text-2xl font-bold text-slate-900">ToolSwap</h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <NavLink
-                to={`/${name}/messages`}
-                className={({ isActive }) =>
-                  `${navLinkStyle} ${isActive ? activeNavLinkStyle : ''}`
-                }
-              >
-                <ChatBubbleLeftRightIcon className="h-5 w-5" />
-                Messages
-                {unreadCount > 0 && (
-                  <span className="absolute top-0 right-0 transform translate-x-1/2 -translate-y-1/2 bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full z-10 shadow-md">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </span>
-                )}
-              </NavLink>
-              <NavLink
-                to={`/${name}/profile`}
-                className={({ isActive }) =>
-                  `${navLinkStyle} ${isActive ? activeNavLinkStyle : ''}`
-                }
-              >
-                <UserCircleIcon className="h-5 w-5" />
-                Profile
-              </NavLink>
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 bg-[#1E3A8A] text-white font-semibold px-4 py-2 rounded-lg shadow-sm hover:bg-[#15275a] transition-all transform hover:scale-105"
-              >
-                <ArrowRightOnRectangleIcon className="h-5 w-5" />
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
+    <div className="min-h-screen bg-slate-50/50 text-slate-800 antialiased font-sans flex flex-col">
+      <Navbar user={currentUserData} onLogout={handleLogout} />
 
       {/* MAIN CONTENT */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <header className="text-center mb-12">
-          <h2 className="text-4xl md:text-5xl font-extrabold text-slate-900 tracking-tight mb-3">
-            Welcome, {name}!
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex-1 w-full">
+        
+        {/* Welcome Header */}
+        <header className="mb-8 p-6 md:p-8 rounded-2xl bg-gradient-to-r from-indigo-600 to-teal-500 text-white shadow-sm">
+          <h2 className="text-3xl font-bold tracking-tight mb-2">
+            Hello, {name}!
           </h2>
-          <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-            Discover tools shared by your community. Ready to start a new project?
+          <p className="text-white/90 text-sm font-medium">
+            Borrow tools from neighbors or list your own tools.
           </p>
         </header>
 
-        {/* Add Tool Section */}
-        <section className="mb-12 p-6 bg-[#1E3A8A] rounded-2xl shadow-xl text-white flex flex-col md:flex-row items-center justify-between gap-4">
-          <div>
-            <h3 className="text-2xl font-bold mb-1">Got a tool to share?</h3>
-            <p className="text-gray-300">Help out a neighbor and list your tool on the platform.</p>
+        {/* Share Callout */}
+        <section className="mb-8 p-6 bg-white border border-slate-100 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center text-lg">
+              🛠️
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">Have a tool to share?</h3>
+              <p className="text-slate-400 text-xs mt-0.5">List it here so neighbors can borrow it.</p>
+            </div>
           </div>
+          
           <button
             onClick={() => navigate(`/${name}/addTool`)}
-            className="bg-white text-[#1E3A8A] font-bold px-6 py-3 rounded-lg shadow-md hover:scale-105 transition-transform flex items-center gap-2"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-full transition-colors flex items-center gap-1.5 shadow-sm"
           >
-            <PlusIcon className="h-5 w-5" />
-            Add a New Tool
+            <PlusIcon className="h-4.5 w-4.5 stroke-[2.5]" />
+            Add Tool
           </button>
         </section>
 
         {/* Search & Location Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-          <div className="relative">
-            <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search for a hammer, drill, etc..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full p-3 pl-12 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#06B6D4] transition-shadow"
-            />
+        <div className="mb-8 bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+          <div className="flex flex-col md:flex-row gap-3">
+            <div className="relative flex-1">
+              <MagnifyingGlassIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search tools..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full p-3 pl-10 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs text-slate-700"
+              />
+            </div>
+            <div className="relative flex-1">
+              <MapPinIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Location..."
+                value={locationFilter}
+                onChange={(e) => setLocationFilter(e.target.value)}
+                className="w-full p-3 pl-10 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs text-slate-700"
+              />
+            </div>
+            <div className="relative min-w-[150px]">
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white p-3 pr-8 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-650 text-xs appearance-none cursor-pointer font-medium"
+              >
+                <option value="newest">📅 Newest</option>
+                <option value="oldest">📅 Oldest</option>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-400">
+                <svg className="fill-current h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                  <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                </svg>
+              </div>
+            </div>
           </div>
-          <div className="relative">
-            <MapPinIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Filter by location..."
-              value={locationFilter}
-              onChange={(e) => setLocationFilter(e.target.value)}
-              className="w-full p-3 pl-12 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#06B6D4] transition-shadow"
-            />
+
+          {/* Category Chips */}
+          <div className="flex gap-2 overflow-x-auto scrollbar-none pt-2 border-t border-slate-50">
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all border flex-shrink-0 ${
+                  selectedCategory === cat
+                    ? "bg-indigo-600 border-indigo-600 text-white"
+                    : "bg-slate-50 border-slate-200/60 text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                <span className="capitalize">{cat === "all" ? "All" : cat}</span>
+              </button>
+            ))}
           </div>
         </div>
 
         {/* Tools Grid */}
         {filteredTools.length === 0 ? (
-          <div className="text-center py-16">
-            <h3 className="text-xl font-semibold text-slate-700">No Tools Found</h3>
-            <p className="text-slate-500 mt-2">Try adjusting your search or filter criteria.</p>
+          <div className="text-center py-20 bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+            <div className="inline-block p-3 bg-slate-50 rounded-xl mb-3">
+              <MagnifyingGlassIcon className="h-8 w-8 text-slate-400 mx-auto" />
+            </div>
+            <h3 className="text-base font-bold text-slate-700 mb-1">No Tools Found</h3>
+            <p className="text-slate-450 mb-5 max-w-xs mx-auto text-xs leading-relaxed">Adjust your search filters to find available neighborhood tools.</p>
+            <button
+              onClick={resetFilters}
+              className="bg-indigo-600 text-white px-5 py-2.5 rounded-full text-xs font-bold hover:bg-indigo-700 transition-all shadow-sm"
+            >
+              Clear Filters
+            </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredTools.map((tool) => (
               <div
                 key={tool._id}
-                className="bg-white rounded-2xl shadow-md overflow-hidden flex flex-col group transition-all duration-300 hover:shadow-xl hover:ring-2 hover:ring-[#06B6D4]"
+                className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col group transition-all duration-300 hover:shadow-md hover:border-slate-200"
               >
-                <div className="overflow-hidden">
+                <div className="relative h-48 bg-slate-50 p-4 flex items-center justify-center border-b border-slate-50">
                   <img
-                    src={tool.image}
+                    src={tool.image || 'https://via.placeholder.com/200'}
                     alt={tool.title}
-                    className="w-full h-56 object-contain group-hover:scale-105 transition-transform duration-300"
+                    className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-[1.02]"
                   />
+                  <div className="absolute top-3 left-3">
+                    {tool.category && (
+                      <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider">
+                        {tool.category}
+                      </span>
+                    )}
+                  </div>
+                  <div className="absolute top-3 right-3">
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                      tool.available 
+                        ? 'bg-emerald-50 text-emerald-700' 
+                        : 'bg-slate-150 bg-slate-200 text-slate-500'
+                    }`}>
+                      {tool.available ? 'Available' : 'Booked'}
+                    </span>
+                  </div>
                 </div>
-                <div className="p-5 flex flex-col flex-1">
-                  <h3 className="text-xl font-bold text-slate-900 mb-2 truncate">{tool.title}</h3>
-                  <p className="text-slate-600 text-sm mb-4 flex-grow">
-                    {tool.description.length > 80 ? `${tool.description.slice(0, 80)}...` : tool.description}
+
+                <div className="p-4 flex flex-col flex-1">
+                  <h3 className="text-sm font-bold text-slate-800 mb-1 group-hover:text-indigo-600 transition-colors line-clamp-1">{tool.title}</h3>
+                  <p className="text-slate-550 text-xs mb-4 flex-grow line-clamp-2 leading-relaxed">
+                    {tool.description}
                   </p>
-                  <p className="flex items-center gap-2 text-sm text-slate-500 mb-4">
-                    <MapPinIcon className="h-5 w-5" />
-                    <span>{tool.location}</span>
-                  </p>
-                  <div className="flex justify-between items-center mt-auto gap-2">
+
+                  <div className="space-y-1.5 mb-4 text-[11px] text-slate-500 border-b border-slate-50 pb-3">
+                    <p className="flex items-center gap-1.5">
+                      <MapPinIcon className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                      <span className="line-clamp-1">{getLocationText(tool.location, tool._id) || 'Location provided'}</span>
+                    </p>
+                    {tool.owner && (
+                      <div className="flex items-center gap-1.5">
+                        <UserCircleIcon className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                        <span>Owner: {tool.owner.name}</span>
+                        {tool.owner.rating > 0 && (
+                          <div className="flex items-center gap-0.5 ml-auto text-amber-500 font-bold">
+                            <StarIcon className="h-3.5 w-3.5 fill-current" />
+                            <span>{tool.owner.rating}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 mt-auto">
                     <button
-                      onClick={() => setSelectedTool(tool)}
-                      className="w-1/3 border border-slate-300 text-slate-800 px-2 py-2 rounded-lg text-sm font-semibold hover:bg-slate-100 transition-colors flex items-center justify-center gap-1"
+                      onClick={() => navigate(`/tool/${tool._id}`)}
+                      className="border border-slate-200 text-slate-600 py-2 rounded-xl text-xs font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-1"
                     >
-                      <EyeIcon className="h-4 w-4" /> View
+                      View
                     </button>
                     <button
                       onClick={() => handleOpenChat(tool)}
-                      className="w-1/3 border border-slate-300 text-slate-800 px-2 py-2 rounded-lg text-sm font-semibold hover:bg-slate-100 transition-colors flex items-center justify-center gap-1"
+                      className="bg-indigo-50 text-indigo-650 py-2 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center justify-center gap-1"
                     >
-                      <ChatBubbleBottomCenterTextIcon className="h-4 w-4" /> Chat
+                      Chat
                     </button>
                     <button
                       onClick={() => handleLend(tool._id)}
-                      className="w-1/3 bg-[#06B6D4] text-white px-2 py-2 rounded-lg text-sm font-semibold hover:bg-[#0598B5] transition-colors flex items-center justify-center gap-1"
+                      disabled={requestedToolIds.includes(tool._id)}
+                      className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${
+                        requestedToolIds.includes(tool._id)
+                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-250'
+                          : 'bg-teal-600 text-white hover:bg-teal-700'
+                      }`}
                     >
-                      <HandRaisedIcon className="h-4 w-4" /> Borrow
+                      {requestedToolIds.includes(tool._id) ? 'Pending' : 'Borrow'}
                     </button>
                   </div>
                 </div>
@@ -310,8 +439,7 @@ const UserDashboard = () => {
         )}
       </main>
 
-      {/* Modal & Footer remain the same as your previous code */}
-      {/* ...ChatModal & Footer components */}
+      {/* ChatModal & Toast */}
       <ChatModal
         isOpen={isChatOpen}
         onClose={() => setIsChatOpen(false)}

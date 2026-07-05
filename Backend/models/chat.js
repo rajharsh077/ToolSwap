@@ -18,6 +18,10 @@ const messageSchema = new mongoose.Schema({
     tool: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Tool',
+    },
+    isRead: {
+        type: Boolean,
+        default: false,
     }
 });
 
