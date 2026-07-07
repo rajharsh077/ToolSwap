@@ -163,7 +163,7 @@ const Home = () => {
         return;
       }
       const uName = decoded.username || decoded.name;
-      setHomeUser({ id: decoded.id || decoded._id, name: uName });
+      setHomeUser({ id: decoded.id || decoded._id, name: uName, isAdmin: decoded.isAdmin });
     } catch {
       localStorage.removeItem("token");
       setHomeUser(null);

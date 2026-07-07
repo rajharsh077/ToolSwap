@@ -5,10 +5,12 @@ import { toast, ToastContainer } from 'react-toastify';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiBaseUrl } from '../config';
 import Navbar from './Navbar';
+import { jwtDecode } from "jwt-decode";
 
 const Leaderboard = () => {
   const [leaderboard, setLeaderboard] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
   const navigate = useNavigate();
   const { name } = useParams();
 
@@ -19,6 +21,13 @@ const Leaderboard = () => {
         if (!token) {
             navigate('/login');
             return;
+        }
+
+        try {
+          const decoded = jwtDecode(token);
+          setUser({ name: decoded.name || decoded.username, isAdmin: decoded.isAdmin });
+        } catch (err) {
+          console.error("Token decode error:", err);
         }
 
         const res = await axios.get(`${apiBaseUrl}/tools/leaderboard`, {
@@ -54,7 +63,7 @@ const Leaderboard = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-        <Navbar user={{ name }} />
+        <Navbar user={user || { name }} />
         <div className="flex-grow flex items-center justify-center">
           <div className="text-center space-y-4">
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mx-auto"></div>
@@ -70,7 +79,7 @@ const Leaderboard = () => {
       <div className="absolute top-0 -left-4 w-96 h-96 bg-indigo-200/20 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-0 -right-4 w-96 h-96 bg-teal-200/10 rounded-full blur-3xl pointer-events-none" />
       
-      <Navbar user={{ name }} />
+      <Navbar user={user || { name }} />
       <ToastContainer position="bottom-right" autoClose={3000} theme="light" />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 relative z-10 w-full flex-1">

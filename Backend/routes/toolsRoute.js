@@ -111,6 +111,9 @@ router.put("/request/:toolId/:borrowerId", authenticateToken, async (req, res) =
       return res.status(400).json({ message: "Invalid status" });
     }
 
+    const tool = await Tool.findById(toolId);
+    if (!tool) return res.status(404).json({ message: "Tool not found" });
+
     const owner = await User.findById(req.user.id);
     if (!owner) return res.status(404).json({ message: "Owner not found" });
 
@@ -135,18 +138,26 @@ router.put("/request/:toolId/:borrowerId", authenticateToken, async (req, res) =
         borrowedAt: new Date(),
       });
 
+      if (!borrower.notifications) borrower.notifications = [];
+      borrower.notifications.push({
+        title: "Request Approved! 🎉",
+        message: `Your request to borrow "${tool.title}" has been approved by the lender.`,
+        type: "success",
+        createdAt: new Date()
+      });
+
       sendMail({
         to: borrower.email,
-        subject: `Your Borrow Request for "${toolEntryOwner.tool}" is Approved`,
-        text: `Your request to borrow "${toolEntryOwner.tool}" has been approved!`,
+        subject: `Your Borrow Request for "${tool.title}" is Approved`,
+        text: `Your request to borrow "${tool.title}" has been approved!`,
       })
       .then(() => console.log(`Approval email sent to ${borrower.email}`))
       .catch(err => console.error("Error sending approval email:", err));
 
       sendMail({
         to: owner.email,
-        subject: `You have successfully lent "${toolEntryOwner.tool}"`,
-        text: `You have successfully lent your tool "${toolEntryOwner.tool}" to ${borrower.name}.`,
+        subject: `You have successfully lent "${tool.title}"`,
+        text: `You have successfully lent your tool "${tool.title}" to ${borrower.name}.`,
       })
       .then(() => console.log(`Lent-success email sent to owner: ${owner.email}`))
       .catch(err => console.error("Error sending email to owner:", err));
@@ -156,19 +167,25 @@ router.put("/request/:toolId/:borrowerId", authenticateToken, async (req, res) =
         (t) => !(t.tool.toString() === toolId && t.borrower.toString() === borrowerId)
       );
       borrower.toolsRequested = borrower.toolsRequested.filter((t) => t.tool.toString() !== toolId);
+
+      if (!borrower.notifications) borrower.notifications = [];
+      borrower.notifications.push({
+        title: "Request Rejected ❌",
+        message: `Your request to borrow "${tool.title}" was rejected by the owner.`,
+        type: "error",
+        createdAt: new Date()
+      });
     }
       sendMail({
         to: borrower.email,
-        subject: `Your Borrow Request for "${toolEntryOwner.tool}" is Rejected`,
-        text: `Sorry, your request to borrow "${toolEntryOwner.tool}" has been rejected.`,
+        subject: `Your Borrow Request for "${tool.title}" is Rejected`,
+        text: `Sorry, your request to borrow "${tool.title}" has been rejected.`,
       })
       .then(() => console.log(`Rejection email sent to ${borrower.email}`))
       .catch(err => console.error("Error sending rejection email:", err));
 
     await owner.save();
     await borrower.save();
-
-    
 
     res.status(200).json({ message: `Request ${status}` });
   } catch (err) {
@@ -225,6 +242,18 @@ router.post("/return/:toolId", authenticateToken, async (req, res) => {
 
     tool.returnRequested = true;
     await tool.save();
+
+    const owner = await User.findById(tool.owner);
+    if (owner) {
+      if (!owner.notifications) owner.notifications = [];
+      owner.notifications.push({
+        title: "Return Requested 🔄",
+        message: `The borrower has requested to return your tool: "${tool.title}". Please confirm return receipt.`,
+        type: "info",
+        createdAt: new Date()
+      });
+      await owner.save();
+    }
 
     res.status(200).json({ message: "Return request sent" });
   } catch (err) {
@@ -333,12 +362,223 @@ router.put("/return/:toolId/confirm", authenticateToken, async (req, res) => {
         { _id: borrowerId, "toolsRequested.tool": toolId },
         { $set: { "toolsRequested.$.status": "returned" } }
       );
+
+      const borrowerUser = await User.findById(borrowerId);
+      if (borrowerUser) {
+        if (!borrowerUser.notifications) borrowerUser.notifications = [];
+        borrowerUser.notifications.push({
+          title: "Return Confirmed! 🙌",
+          message: `The return of "${tool.title}" has been confirmed by the lender. Thank you!`,
+          type: "success",
+          createdAt: new Date()
+        });
+        await borrowerUser.save();
+      }
     }
 
     res.status(200).json({ message: "Return confirmed successfully" });
   } catch (err) {
     console.error("Error in return confirm:", err);
     res.status(500).json({ message: "Server error confirming return" });
+  }
+});
+
+// --- Admin Middleware ---
+const isAdmin = (req, res, next) => {
+  if (req.user && req.user.isAdmin) {
+    next();
+  } else {
+    res.status(403).json({ message: "Access denied. Admins only." });
+  }
+};
+
+// -------------------- Get Flagged Tools --------------------
+// Path: /flagged
+router.get("/flagged", authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const flaggedTools = await Tool.find({ isFlagged: true })
+      .populate("owner", "name email")
+      .populate("flaggedBy", "name email");
+    res.json(flaggedTools);
+  } catch (err) {
+    console.error("Error fetching flagged tools:", err);
+    res.status(500).json({ message: "Failed to fetch flagged tools" });
+  }
+});
+
+// -------------------- Get Flagged Borrowers --------------------
+// Path: /flaggedBorrowers
+router.get("/flaggedBorrowers", authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const flaggedBorrowers = await Tool.find({ borrowerFlagged: true })
+      .populate("borrowedBy", "name email warnCount isBanned")
+      .populate("reportedBorrower", "name email warnCount isBanned")
+      .populate("borrowerFlaggedBy", "name email");
+    res.json(flaggedBorrowers);
+  } catch (err) {
+    console.error("Error fetching flagged borrowers:", err);
+    res.status(500).json({ message: "Failed to fetch flagged borrowers" });
+  }
+});
+
+// -------------------- Moderate Tool --------------------
+// Path: /moderate/:toolId
+router.put("/moderate/:toolId", authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const { toolId } = req.params;
+    const { action } = req.body; // 'approve' (clear flag) or 'reject' (remove tool)
+
+    const tool = await Tool.findById(toolId);
+    if (!tool) {
+      return res.status(404).json({ message: "Tool not found" });
+    }
+
+    if (action === "approve") {
+      tool.isFlagged = false;
+      tool.flaggedBy = null;
+      tool.flagReason = "";
+      tool.flaggedAt = null;
+      await tool.save();
+      return res.json({ message: "Tool approved (flags cleared)", tool });
+    } else if (action === "reject") {
+      const ownerId = tool.owner;
+
+      // Delete the tool
+      await Tool.findByIdAndDelete(toolId);
+
+      // Remove from owner's toolsOwned
+      await User.findByIdAndUpdate(ownerId, { $pull: { toolsOwned: toolId } });
+
+      // Clean up requests
+      await User.updateMany(
+        {},
+        { $pull: { toolsRequested: { tool: toolId }, toolsLentOut: { tool: toolId } } }
+      );
+
+      return res.json({ message: "Tool rejected and removed from platform" });
+    } else {
+      return res.status(400).json({ message: "Invalid action" });
+    }
+  } catch (err) {
+    console.error("Error moderating tool:", err);
+    res.status(500).json({ message: "Failed to moderate tool" });
+  }
+});
+
+// -------------------- Moderate Borrower Report --------------------
+// Path: /borrower/moderate/:toolId
+router.put("/borrower/moderate/:toolId", authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const { toolId } = req.params;
+    const { action } = req.body; // 'approve' (resolve/clear) or 'warn'
+
+    const tool = await Tool.findById(toolId);
+    if (!tool) {
+      return res.status(404).json({ message: "Tool not found" });
+    }
+
+    if (action === "approve") {
+      tool.borrowerFlagged = false;
+      tool.borrowerFlaggedBy = null;
+      tool.borrowerFlagReason = "";
+      tool.borrowerFlaggedAt = null;
+      tool.reportedBorrower = null;
+      await tool.save();
+      return res.json({ message: "Borrower report resolved and cleared", tool });
+    } else if (action === "warn") {
+      const targetBorrowerId = tool.reportedBorrower || tool.borrowedBy;
+      if (targetBorrowerId) {
+        const targetBorrower = await User.findById(targetBorrowerId);
+        if (targetBorrower) {
+          targetBorrower.warnCount = (targetBorrower.warnCount || 0) + 1;
+          if (!targetBorrower.notifications) targetBorrower.notifications = [];
+          targetBorrower.notifications.push({
+            title: "Formal Warning Issued ⚠️",
+            message: `You have received a formal warning regarding the tool: "${tool.title}". Reason: "${tool.borrowerFlagReason || "Problematic return"}"`,
+            type: "warning",
+            createdAt: new Date()
+          });
+          await targetBorrower.save();
+        }
+      }
+      tool.borrowerFlagged = false;
+      tool.borrowerFlaggedBy = null;
+      tool.borrowerFlagReason = "";
+      tool.borrowerFlaggedAt = null;
+      tool.reportedBorrower = null;
+      await tool.save();
+      return res.json({ message: "Borrower warned and report cleared successfully", tool });
+    } else {
+      return res.status(400).json({ message: "Invalid action" });
+    }
+  } catch (err) {
+    console.error("Error moderating borrower report:", err);
+    res.status(500).json({ message: "Failed to moderate borrower report" });
+  }
+});
+
+// -------------------- Report/Flag a Tool listing (User action) --------------------
+// Path: /report/:toolId (accessed via /tools/report/:toolId)
+router.post("/report/:toolId", authenticateToken, async (req, res) => {
+  try {
+    const { toolId } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ message: "Please provide a reason for flagging this listing" });
+    }
+
+    const tool = await Tool.findById(toolId);
+    if (!tool) return res.status(404).json({ message: "Tool listing not found" });
+
+    tool.isFlagged = true;
+    tool.flaggedBy = req.user.id;
+    tool.flagReason = reason.trim();
+    tool.flaggedAt = new Date();
+
+    await tool.save();
+    res.status(200).json({ message: "Listing flagged for review successfully" });
+  } catch (err) {
+    console.error("Error flagging tool listing:", err);
+    res.status(500).json({ message: "Failed to flag listing" });
+  }
+});
+
+// -------------------- Report/Flag a Borrower (Owner action) --------------------
+// Path: /borrower/report/:toolId (accessed via /tools/borrower/report/:toolId)
+router.post("/borrower/report/:toolId", authenticateToken, async (req, res) => {
+  try {
+    const { toolId } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ message: "Please provide a reason for reporting the borrower" });
+    }
+
+    const tool = await Tool.findById(toolId);
+    if (!tool) return res.status(404).json({ message: "Tool not found" });
+
+    // Validate that the requester is the owner of the tool
+    if (tool.owner.toString() !== req.user.id) {
+      return res.status(403).json({ message: "You are not authorized to report the borrower for this tool" });
+    }
+
+    // Verify there is a current borrower to flag
+    if (!tool.borrowedBy) {
+      return res.status(400).json({ message: "This tool is not currently borrowed" });
+    }
+
+    tool.borrowerFlagged = true;
+    tool.borrowerFlaggedBy = req.user.id;
+    tool.borrowerFlagReason = reason.trim();
+    tool.borrowerFlaggedAt = new Date();
+    tool.reportedBorrower = tool.borrowedBy;
+
+    await tool.save();
+    res.status(200).json({ message: "Borrower reported successfully" });
+  } catch (err) {
+    console.error("Error reporting borrower:", err);
+    res.status(500).json({ message: "Failed to report borrower" });
   }
 });
 

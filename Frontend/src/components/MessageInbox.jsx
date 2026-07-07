@@ -78,6 +78,7 @@ const MessageInbox = () => {
       setCurrentUser({
         id: decoded.id || decoded.userId || decoded._id,
         name: decoded.name || decoded.username,
+        isAdmin: decoded.isAdmin,
       });
     } catch {
       toast.error('Invalid session.');

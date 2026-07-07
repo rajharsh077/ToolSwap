@@ -66,6 +66,7 @@ const UserDashboard = () => {
 
     let decodedUserId;
     let tokenUsername;
+    let isAdminAccount = false;
 
     try {
       const decoded = jwtDecode(token);
@@ -78,6 +79,7 @@ const UserDashboard = () => {
       }
       tokenUsername = decoded.username || decoded.name;
       decodedUserId = decoded.id || decoded.userId || decoded._id;
+      isAdminAccount = decoded.isAdmin || false;
     } catch {
       toast.error("Invalid token.");
       localStorage.removeItem("token");
@@ -99,7 +101,7 @@ const UserDashboard = () => {
           setTools(othersTools);
           setFilteredTools(othersTools);
           setName(tokenUsername);
-          setCurrentUserData({ id: decodedUserId, name: tokenUsername });
+          setCurrentUserData({ id: decodedUserId, name: tokenUsername, isAdmin: isAdminAccount });
           setIsDataInitialized(true);
         } catch {
           toast.error("Failed to fetch tools.");

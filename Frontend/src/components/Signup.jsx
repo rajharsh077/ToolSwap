@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { UserPlusIcon, EnvelopeIcon, LockClosedIcon, MapPinIcon, PhoneIcon, WrenchScrewdriverIcon } from "@heroicons/react/24/solid";
 import { apiBaseUrl } from "../config";
+import { toast, ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 const Signup = () => {
   const navigate = useNavigate();
@@ -30,8 +32,10 @@ const Signup = () => {
 
     try {
       const { data } = await axios.post(`${apiBaseUrl}/signup`, formData);
-      alert(data.message);
-      navigate("/login");
+      toast.success(data.message);
+      setTimeout(() => {
+        navigate("/login");
+      }, 1500);
     } catch (err) {
       if (err.response && err.response.data.message) {
         setError(err.response.data.message);
@@ -199,6 +203,7 @@ const Signup = () => {
           </div>
         </div>
       </div>
+      <ToastContainer position="bottom-right" autoClose={3000} theme="light" />
     </div>
   );
 };

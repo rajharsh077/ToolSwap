@@ -101,7 +101,7 @@ const ListedToolCard = ({ tool, onToggle, onEdit, onDelete, navigate, getLocatio
 
             <div className="space-y-0.5 text-xs text-slate-550 font-semibold mb-2">
               <p className="truncate"><span className="text-slate-400">Category:</span> <span className="text-slate-700">{tool.category || "General"}</span></p>
-              <p><span className="text-slate-400">Stats:</span> <span className="text-indigo-600 font-bold">Borrowed {tool.reviews?.length ? tool.reviews.length * 3 + 1 : 4} times</span></p>
+              <p><span className="text-slate-400">Stats:</span> <span className="text-indigo-600 font-bold">Borrowed {tool.reviews?.length || 0} times</span></p>
               <p><span className="text-slate-400">Added:</span> <span>{timeAgo(tool.createdAt)}</span></p>
             </div>
 
@@ -448,6 +448,12 @@ const SkeletonLoader = () => (
 // =================================================================================
 
 const UserProfile = () => {
+  const getLocationText = (location) => {
+    if (typeof location === "string") return location;
+    if (!location) return "Not provided";
+    return location.address || location.placeName || (location.lat != null && location.lng != null ? `${location.lat}, ${location.lng}` : "Not provided");
+  };
+
   const [lentTools, setLentTools] = useState([]);
   const [borrowedTools, setBorrowedTools] = useState([]);
   const [requests, setRequests] = useState([]);
@@ -465,7 +471,7 @@ const UserProfile = () => {
   const [selectedOwner, setSelectedOwner] = useState(null);
   const [selectedRating, setSelectedRating] = useState(5);
   const [isProfileEditOpen, setIsProfileEditOpen] = useState(false);
-  const [profileForm, setProfileForm] = useState({ name: "", phone: "", location: "", profileImage: "", isVerified: false, rating: 0, numReviews: 0, lendsCount: 0 });
+  const [profileForm, setProfileForm] = useState({ name: "", phone: "", location: "", profileImage: "", isVerified: false, rating: 0, numReviews: 0, lendsCount: 0, borrowsCount: 0, toolsLentOut: [], toolsRequested: [] });
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const navigate = useNavigate();
@@ -474,6 +480,7 @@ const UserProfile = () => {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [targetChat, setTargetChat] = useState({ user: null, tool: null }); 
   const [currentUserName, setCurrentUserName] = useState('');
+  const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState(false);
   
   // Custom states added for search and confirmation dialog
   const [searchQuery, setSearchQuery] = useState("");
@@ -515,6 +522,7 @@ const UserProfile = () => {
       currentUserId = decoded.id || decoded._id;
       setUserId(currentUserId);
       setCurrentUserName(decoded.name || decoded.username); 
+      setCurrentUserIsAdmin(decoded.isAdmin || false);
     } catch {
       toast.error("Invalid token. Please login again.");
       localStorage.removeItem("token");
@@ -548,6 +556,9 @@ const UserProfile = () => {
         rating: ownedRes.data.rating || 0,
         numReviews: ownedRes.data.numReviews || 0,
         lendsCount: ownedRes.data.lendsCount || 0,
+        borrowsCount: ownedRes.data.borrowsCount || 0,
+        toolsLentOut: ownedRes.data.toolsLentOut || [],
+        toolsRequested: ownedRes.data.toolsRequested || [],
       });
       setToolsWithBorrowers(lentOutRes.data || []);
       setBorrowedTools(borrowedRes.data || []);
@@ -608,8 +619,8 @@ const UserProfile = () => {
         const token = localStorage.getItem("token");
         try {
           await axios.put(`${apiBaseUrl}/tools/return/${toolId}/confirm`, {}, { headers: { Authorization: `Bearer ${token}` } });
-          setToolsWithBorrowers((prev) => prev.filter((tool) => tool._id !== toolId));
           toast.success(`Return confirmed for "${toolTitle}".`);
+          await fetchProfileData();
           
           if (borrower && borrower._id) {
             setSelectedOwner(borrower);
@@ -803,66 +814,124 @@ const UserProfile = () => {
   // Helper to compile recent activities from real data
   const getRecentActivities = () => {
     const list = [];
-    
+
+    // 1. Process active lend requests
     if (requests && requests.length > 0) {
       requests.forEach((req) => {
         list.push({
           id: `req-${req._id}`,
-          text: `New borrow request for ${req.toolTitle} from ${req.borrowerName}`,
+          text: `New borrow request for "${req.toolTitle}" from ${req.borrowerName}`,
           time: timeAgo(req.createdAt),
           icon: <InboxIcon className="h-4 w-4 text-amber-500" />,
-          color: "border-amber-250 bg-amber-55/10 text-amber-800"
+          color: "border-amber-250 bg-amber-55/10 text-amber-800",
+          date: new Date(req.createdAt)
         });
       });
     }
-    
-    if (toolsWithBorrowers && toolsWithBorrowers.length > 0) {
-      toolsWithBorrowers.forEach((tool) => {
-        list.push({
-          id: `lent-${tool._id}`,
-          text: `You lent ${tool.title} to ${tool.borrowedBy?.name || 'User'}`,
-          time: timeAgo(tool.borrowedAt),
-          icon: <CheckIcon className="h-4 w-4 text-emerald-500" />,
-          color: "border-emerald-250 bg-emerald-55/10 text-emerald-850"
-        });
+
+    // 2. Process all lent-out transactions from history (toolsLentOut)
+    if (profileForm.toolsLentOut && profileForm.toolsLentOut.length > 0) {
+      profileForm.toolsLentOut.forEach((t) => {
+        if (!t.tool) return;
+        const toolTitle = t.tool.title;
+        const borrowerName = t.borrower?.name || "Neighbor";
+        
+        let activityText = "";
+        let activityColor = "";
+        let activityIcon = null;
+
+        if (t.status === "returned") {
+          activityText = `You confirmed return of "${toolTitle}" from ${borrowerName}`;
+          activityColor = "border-emerald-250 bg-emerald-55/10 text-emerald-850";
+          activityIcon = <CheckIcon className="h-4 w-4 text-emerald-500" />;
+        } else if (t.status === "approved") {
+          activityText = `You lent "${toolTitle}" to ${borrowerName}`;
+          activityColor = "border-emerald-200 bg-emerald-50/10 text-emerald-800";
+          activityIcon = <ShareIcon className="h-4 w-4 text-emerald-500" />;
+        } else if (t.status === "pending") {
+          activityText = `Lend request pending for "${toolTitle}" to ${borrowerName}`;
+          activityColor = "border-amber-200 bg-amber-50/10 text-amber-800";
+          activityIcon = <InboxIcon className="h-4 w-4 text-amber-500" />;
+        }
+
+        if (activityText) {
+          list.push({
+            id: `lent-hist-${t._id}`,
+            text: activityText,
+            time: timeAgo(t.lendDate || t.createdAt || new Date()),
+            icon: activityIcon,
+            color: activityColor,
+            date: new Date(t.lendDate || t.createdAt || new Date())
+          });
+        }
       });
     }
-    
-    if (borrowedTools && borrowedTools.length > 0) {
-      borrowedTools.forEach((tool) => {
-        list.push({
-          id: `borrow-${tool._id}`,
-          text: `You borrowed ${tool.title} from ${tool.owner?.name || 'Owner'}`,
-          time: timeAgo(tool.borrowedAt),
-          icon: <CheckIcon className="h-4 w-4 text-indigo-500" />,
-          color: "border-indigo-250 bg-indigo-55/10 text-indigo-850"
-        });
+
+    // 3. Process all requested/borrowed transactions from history (toolsRequested)
+    if (profileForm.toolsRequested && profileForm.toolsRequested.length > 0) {
+      profileForm.toolsRequested.forEach((t) => {
+        if (!t.tool) return;
+        const toolTitle = t.tool.title;
+        const ownerName = t.tool.owner?.name || "Owner";
+
+        let activityText = "";
+        let activityColor = "";
+        let activityIcon = null;
+
+        if (t.status === "returned") {
+          activityText = `You returned "${toolTitle}" to ${ownerName}`;
+          activityColor = "border-slate-200 bg-slate-50/20 text-slate-700";
+          activityIcon = <CheckIcon className="h-4 w-4 text-slate-500" />;
+        } else if (t.status === "approved") {
+          activityText = `You borrowed "${toolTitle}" from ${ownerName}`;
+          activityColor = "border-indigo-250 bg-indigo-55/10 text-indigo-850";
+          activityIcon = <CheckIcon className="h-4 w-4 text-indigo-500" />;
+        } else if (t.status === "pending") {
+          activityText = `You requested to borrow "${toolTitle}" from ${ownerName}`;
+          activityColor = "border-amber-200 bg-amber-50/10 text-amber-800";
+          activityIcon = <InboxIcon className="h-4 w-4 text-amber-500" />;
+        }
+
+        if (activityText) {
+          list.push({
+            id: `borrow-hist-${t._id}`,
+            text: activityText,
+            time: timeAgo(t.requestDate || t.createdAt || new Date()),
+            icon: activityIcon,
+            color: activityColor,
+            date: new Date(t.requestDate || t.createdAt || new Date())
+          });
+        }
       });
     }
-    
+
+    // Sort by date (newest first)
+    list.sort((a, b) => b.date - a.date);
+
+    // If list is still small, backfill with default instructions/tips instead of fake ratings
     if (list.length < 4) {
       const placeholders = [
         {
           id: 'def-1',
-          text: 'Emma rated you ⭐⭐⭐⭐⭐',
-          time: '3 days ago',
+          text: 'List a new tool to start lending in your community! 🛠️',
+          time: 'Info',
           icon: <StarIcon className="h-4 w-4 text-amber-400" />,
           color: "border-amber-200 bg-amber-50/10 text-amber-800"
         },
         {
           id: 'def-2',
-          text: 'John returned Screwdriver',
-          time: 'Yesterday',
+          text: 'Browse the Home page to borrow tools from neighbors! 🤝',
+          time: 'Info',
           icon: <CheckIcon className="h-4 w-4 text-slate-500" />,
-          color: "border-slate-200 bg-slate-50/10 text-slate-800"
+          color: "border-slate-200 bg-slate-50/10 text-slate-700"
         }
       ];
-      placeholders.forEach(item => {
-        if (list.length < 4) list.push(item);
+      placeholders.forEach(p => {
+        if (list.length < 4) list.push(p);
       });
     }
-    
-    return list.slice(0, 4);
+
+    return list.slice(0, 5); // Return top 5 recent activities
   };
 
   // --- Content Renderer ---
@@ -983,7 +1052,7 @@ const UserProfile = () => {
       <div className="absolute top-0 -left-4 w-96 h-96 bg-indigo-200/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-0 -right-4 w-96 h-96 bg-teal-200/15 rounded-full blur-3xl pointer-events-none" />
       
-      <Navbar user={{ name: currentUserName }} onLogout={handleLogout} />
+      <Navbar user={{ name: currentUserName, isAdmin: currentUserIsAdmin }} onLogout={handleLogout} />
       <ToastContainer position="bottom-right" autoClose={3000} theme="light" />
 
       {/* RENDER SKELETON LOADER IF LOADING */}
@@ -1101,7 +1170,7 @@ const UserProfile = () => {
                 <span className="text-xs font-black text-slate-400 uppercase tracking-wider">Lent</span>
                 <ShareIcon className={`h-5 w-5 transition-transform group-hover:scale-110 ${activeTab === "lentOut" ? "text-emerald-600" : "text-slate-400"}`} />
               </div>
-              <p className="text-2xl font-black text-emerald-600">{toolsWithBorrowers.length}</p>
+              <p className="text-2xl font-black text-emerald-600">{profileForm.lendsCount || 0}</p>
             </button>
 
             <button
@@ -1116,7 +1185,7 @@ const UserProfile = () => {
                 <span className="text-xs font-black text-slate-400 uppercase tracking-wider">Borrowed</span>
                 <ArchiveBoxIcon className={`h-5 w-5 transition-transform group-hover:scale-110 ${activeTab === "borrowed" ? "text-rose-500" : "text-slate-400"}`} />
               </div>
-              <p className="text-2xl font-black text-rose-500">{borrowedTools.length}</p>
+              <p className="text-2xl font-black text-rose-500">{profileForm.borrowsCount || 0}</p>
             </button>
 
             <button
@@ -1448,7 +1517,7 @@ const UserProfile = () => {
                 className={`flex-1 py-2.5 rounded-full text-white shadow-md transition-colors ${
                   confirmState.isDangerous
                     ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/10'
-                    : 'bg-indigo-650 hover:bg-indigo-750 shadow-indigo-600/10'
+                    : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/10'
                 }`}
                 onClick={confirmState.onConfirm}
               >

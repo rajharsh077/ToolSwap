@@ -99,6 +99,12 @@ borrowedAt: {
     default: null
   },
 
+  reportedBorrower: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+
   availabilityDates: [
     {
       type: Date

@@ -98,9 +98,15 @@ const Navbar = ({ user, onLogout }) => {
 
             {user && (
               <>
-                <NavLink to={`/${userName}`} end className={({ isActive }) => `${baseNavLinkStyle} ${isActive ? activeNavLinkStyle : inactiveNavLinkStyle}`}>
-                  <WrenchScrewdriverIcon className="h-4 w-4" /> Dashboard
-                </NavLink>
+                {user.isAdmin ? (
+                  <NavLink to="/admin" end className={({ isActive }) => `${baseNavLinkStyle} ${isActive ? activeNavLinkStyle : inactiveNavLinkStyle}`}>
+                    <Cog6ToothIcon className="h-4 w-4" /> Admin Dashboard
+                  </NavLink>
+                ) : (
+                  <NavLink to={`/${userName}`} end className={({ isActive }) => `${baseNavLinkStyle} ${isActive ? activeNavLinkStyle : inactiveNavLinkStyle}`}>
+                    <WrenchScrewdriverIcon className="h-4 w-4" /> Dashboard
+                  </NavLink>
+                )}
                 <NotificationMenu />
                 <NavLink to={`/${userName}/messages`} className={({ isActive }) => `${baseNavLinkStyle} ${isActive ? activeNavLinkStyle : inactiveNavLinkStyle}`}>
                   <ChatBubbleLeftRightIcon className="h-4 w-4" /> Messages
@@ -139,9 +145,15 @@ const Navbar = ({ user, onLogout }) => {
                 </>
               ) : (
                 <>
-                  <NavLink to={`/${userName}`} onClick={() => setIsOpen(false)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-all flex items-center gap-2">
-                    <WrenchScrewdriverIcon className="h-4.5 w-4.5" /> Dashboard
-                  </NavLink>
+                  {user.isAdmin ? (
+                    <NavLink to="/admin" onClick={() => setIsOpen(false)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-all flex items-center gap-2">
+                      <Cog6ToothIcon className="h-4.5 w-4.5" /> Admin Dashboard
+                    </NavLink>
+                  ) : (
+                    <NavLink to={`/${userName}`} onClick={() => setIsOpen(false)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-all flex items-center gap-2">
+                      <WrenchScrewdriverIcon className="h-4.5 w-4.5" /> Dashboard
+                    </NavLink>
+                  )}
                   <NavLink to={`/${userName}/messages`} onClick={() => setIsOpen(false)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-all flex justify-between items-center">
                     <span className="flex items-center gap-2"><ChatBubbleLeftRightIcon className="h-4.5 w-4.5" /> Messages</span>
                     {unreadCount > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{unreadCount}</span>}

@@ -19,7 +19,11 @@ const Login = () => {
         const decoded = jwtDecode(token);
         const now = Date.now() / 1000;
         if (decoded.exp > now) {
-          navigate(`/${decoded.name}`, { replace: true }); // token valid
+          if (decoded.isAdmin) {
+            navigate("/admin", { replace: true });
+          } else {
+            navigate(`/${decoded.name}`, { replace: true }); // token valid
+          }
         } else {
           localStorage.removeItem("token"); // expired
         }
@@ -40,7 +44,11 @@ const Login = () => {
       });
 
       localStorage.setItem("token", data.token);
-      navigate(`/${data.user.name}`, { replace: true });
+      if (data.user.isAdmin) {
+        navigate("/admin", { replace: true });
+      } else {
+        navigate(`/${data.user.name}`, { replace: true });
+      }
     } catch (err) {
       if (err.response?.data?.message) {
         setError(err.response.data.message);

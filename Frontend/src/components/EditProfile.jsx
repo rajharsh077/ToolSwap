@@ -36,7 +36,7 @@ const EditProfile = () => {
         navigate("/login");
         return;
       }
-      setCurrentUser({ id: decoded.id || decoded._id, name: decoded.name });
+      setCurrentUser({ id: decoded.id || decoded._id, name: decoded.name, isAdmin: decoded.isAdmin });
     } catch {
       navigate("/login");
     }

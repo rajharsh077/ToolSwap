@@ -61,7 +61,7 @@ const AddTool = () => {
 
       const tokenUsername = decoded.username || decoded.name;
       const decodedUserId = decoded.id || decoded.userId || decoded._id;
-      setCurrentUserData({ id: decodedUserId, name: tokenUsername });
+      setCurrentUserData({ id: decodedUserId, name: tokenUsername, isAdmin: decoded.isAdmin });
 
       if (tokenUsername !== name) {
         toast.info("Redirected to your profile.");

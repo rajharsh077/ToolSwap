@@ -28,7 +28,7 @@ const ToolDetail = () => {
       try {
         const decoded = jwtDecode(token);
         if (decoded?.exp && decoded.exp > Date.now() / 1000) {
-          setUser({ id: decoded.id || decoded._id, name: decoded.name });
+          setUser({ id: decoded.id || decoded._id, name: decoded.name, isAdmin: decoded.isAdmin });
         }
       } catch (err) {
         console.error("Token decode error:", err);
