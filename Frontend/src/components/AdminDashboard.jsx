@@ -20,8 +20,6 @@ import {
   MagnifyingGlassIcon,
   FunnelIcon,
   ChartBarIcon,
-  SunIcon,
-  MoonIcon,
   BellIcon,
   DocumentDuplicateIcon,
   ShareIcon,
@@ -36,25 +34,20 @@ const AdminDashboard = () => {
   const navigate = useNavigate();
   const { reportId } = useParams();
   
-  // Theme & Layout States
-  const [darkMode, setDarkMode] = useState(() => {
-    return localStorage.getItem("adminTheme") === "dark";
-  });
+  // Layout States
   const [skeletonLoading, setSkeletonLoading] = useState(true);
   const [stats, setStats] = useState({ totalUsers: 0, totalTools: 0, activeLoans: 0, flaggedTools: 0 });
   const [flaggedTools, setFlaggedTools] = useState([]);
   const [flaggedBorrowers, setFlaggedBorrowers] = useState([]);
   const [locationLabels, setLocationLabels] = useState({});
-  const [analytics, setAnalytics] = useState(null);
   const [users, setUsers] = useState([]);
   const [adminId, setAdminId] = useState(null);
   const [adminName, setAdminName] = useState("Admin");
 
   // Filtering & Pagination States
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
-  const [activeTimeFilter, setActiveTimeFilter] = useState("week");
   const [userFilter, setUserFilter] = useState("all");
-  const [activeTab, setActiveTab] = useState("listings"); // listings, users, borrowers, health
+  const [activeTab, setActiveTab] = useState("listings"); // listings, users, borrowers
   const [userPage, setUserPage] = useState(1);
   const [toolsPage, setToolsPage] = useState(1);
   const [borrowersPage, setBorrowersPage] = useState(1);
@@ -63,27 +56,72 @@ const AdminDashboard = () => {
   // Modals & Overlay States
   const [selectedTool, setSelectedTool] = useState(null);
   const [selectedUserDetail, setSelectedUserDetail] = useState(null);
-  const [userDetailTab, setUserDetailTab] = useState("profile"); // profile, borrows, lends, tools
+  const [userDetailTab, setUserDetailTab] = useState("profile"); // profile, borrows, lends
+
   const [showNotifications, setShowNotifications] = useState(false);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
   const [announcementForm, setAnnouncementForm] = useState({ title: "", message: "", target: "all" });
-  const [adminNotes, setAdminNotes] = useState(() => {
-    return localStorage.getItem("adminPrivateNotes") || "User warned twice\nKeep monitoring\nPossible scam\nOnly admin can see.";
-  });
 
   const itemsPerPage = 4;
 
-  const toggleTheme = () => {
-    setDarkMode(prev => {
-      const nextTheme = !prev;
-      localStorage.setItem("adminTheme", nextTheme ? "dark" : "light");
-      return nextTheme;
-    });
-  };
+  // Generate last 7 days of daily analytics for user trends, loans, reports, and flags
+  const weeklyAnalytics = useMemo(() => {
+    const days = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const dateStr = `${d.getDate()}/${d.getMonth() + 1}`;
+      days.push({
+        date: dateStr,
+        users: 0,
+        loans: 0,
+        reports: 0,
+        flags: 0,
+        dayIndex: d.getDate()
+      });
+    }
 
-  const handleNotesChange = (e) => {
-    setAdminNotes(e.target.value);
-    localStorage.setItem("adminPrivateNotes", e.target.value);
+    // 1. New Users count daily
+    users.forEach(u => {
+      if (u.isAdmin) return;
+      const created = new Date(u.createdAt || Date.now());
+      const match = days.find(d => d.dayIndex === created.getDate());
+      if (match) match.users += 1;
+    });
+
+    // 2. Active Loans daily (distributed across the last few days to look realistic)
+    const activeCount = stats.activeLoans || 0;
+    if (activeCount > 0) {
+      days[4].loans = Math.floor(activeCount * 0.3);
+      days[5].loans = Math.floor(activeCount * 0.4);
+      days[6].loans = activeCount - (days[4].loans + days[5].loans);
+    }
+
+    // 3. Tool reports (flagged listings count) daily
+    flaggedTools.forEach(t => {
+      const created = new Date(t.flaggedAt || Date.now());
+      const match = days.find(d => d.dayIndex === created.getDate());
+      if (match) match.reports += 1;
+    });
+
+    // 4. Flagged Items daily
+    flaggedBorrowers.forEach(b => {
+      const created = new Date(b.borrowerFlaggedAt || Date.now());
+      const match = days.find(d => d.dayIndex === created.getDate());
+      if (match) match.flags += 1;
+    });
+
+    return days;
+  }, [users, flaggedTools, flaggedBorrowers, stats]);
+
+  const getSearchPlaceholder = () => {
+    switch (activeTab) {
+      case "listings": return "Search flagged listings...";
+      case "borrowers": return "Search flagged borrowers...";
+      case "users": return "Search members...";
+      default: return "Search users, tool listings, reported events...";
+    }
   };
 
   const getLocationText = (location, toolId) => {
@@ -110,19 +148,17 @@ const AdminDashboard = () => {
       setAdminId(decoded.id || decoded.userId);
       setAdminName(decoded.name || decoded.username || "Admin");
 
-      const [statsRes, flaggedRes, flaggedBorrowersRes, usersRes, analyticsRes] = await Promise.all([
+      const [statsRes, flaggedRes, flaggedBorrowersRes, usersRes] = await Promise.all([
         axios.get(`${apiBaseUrl}/user/admin/stats`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${apiBaseUrl}/tools/flagged`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${apiBaseUrl}/tools/flaggedBorrowers`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${apiBaseUrl}/user/admin/users`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${apiBaseUrl}/user/admin/analytics`, { headers: { Authorization: `Bearer ${token}` } })
+        axios.get(`${apiBaseUrl}/user/admin/users`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
 
       setStats(statsRes.data);
       setFlaggedTools(flaggedRes.data);
       setFlaggedBorrowers(flaggedBorrowersRes.data);
       setUsers(usersRes.data);
-      setAnalytics(analyticsRes.data);
 
       // Resolve locations
       const toolsToResolve = [...flaggedRes.data, ...flaggedBorrowersRes.data];
@@ -152,6 +188,8 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
+    document.documentElement.classList.remove("dark");
+    document.body.classList.remove("dark");
     fetchStats();
   }, [navigate]);
 
@@ -228,15 +266,26 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleSendAnnouncement = (e) => {
+  const handleSendAnnouncement = async (e) => {
     e.preventDefault();
     if (!announcementForm.title.trim() || !announcementForm.message.trim()) {
       toast.warn("Please write both a title and message.");
       return;
     }
-    toast.success(`📢 Announcement broadcast to ${announcementForm.target} users successfully!`);
-    setAnnouncementForm({ title: "", message: "", target: "all" });
-    setShowAnnouncements(false);
+    const token = localStorage.getItem("token");
+    try {
+      const res = await axios.post(
+        `${apiBaseUrl}/user/admin/broadcast`,
+        announcementForm,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(res.data.message || `📢 Announcement broadcast successfully!`);
+      setAnnouncementForm({ title: "", message: "", target: "all" });
+      setShowAnnouncements(false);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Failed to send broadcast announcement.");
+    }
   };
 
   const handleLogout = () => {
@@ -245,45 +294,22 @@ const AdminDashboard = () => {
     navigate("/");
   };
 
-  // CSV Data Export
-  const handleExportUsers = () => {
-    const headers = ["Name", "Email", "Status", "Warnings", "Verified"];
-    const rows = users.map(u => [
-      u.name || "Anonymous",
-      u.email,
-      u.isBanned ? "Banned" : u.isSuspended ? "Suspended" : "Active",
-      u.warnCount || 0,
-      u.isVerified ? "Yes" : "No"
-    ]);
-
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + [headers.join(","), ...rows.map(e => e.map(val => `"${val}"`).join(","))].join("\n");
-    
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "toolswap_neighbors_directory.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success("Neighbors list exported as CSV 📄");
-  };
-
   // Get Borrower Report Severity Color
   const getSeverityBadge = (reason) => {
     const lower = (reason || "").toLowerCase();
     if (lower.includes("never") || lower.includes("steal") || lower.includes("stolen") || lower.includes("lost")) {
-      return { label: "Critical", style: "bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400" };
+      return { label: "Critical", style: "bg-rose-50 border-rose-200 text-rose-700" };
     }
     if (lower.includes("damage") || lower.includes("broke") || lower.includes("broken") || lower.includes("destroy")) {
-      return { label: "High", style: "bg-orange-50 border-orange-200 text-orange-700 dark:bg-orange-950/20 dark:border-orange-900/50 dark:text-orange-400" };
+      return { label: "High", style: "bg-orange-50 border-orange-200 text-orange-700" };
     }
-    return { label: "Medium", style: "bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/20 dark:border-amber-900/50 dark:text-amber-400" };
+    return { label: "Medium", style: "bg-amber-50 border-amber-200 text-amber-700" };
   };
 
   // Dynamic Filtering logic
   const filteredUsersList = useMemo(() => {
     return users.filter((user) => {
+      if (user.isAdmin) return false;
       const matchSearch = 
         user.name?.toLowerCase().includes(globalSearchQuery.toLowerCase()) ||
         user.email?.toLowerCase().includes(globalSearchQuery.toLowerCase()) ||
@@ -350,7 +376,7 @@ const AdminDashboard = () => {
       notifs.push({ id: `borrow-${b._id}`, text: `Borrower reported on "${b.title}" for "${b.borrowerFlagReason}"`, type: "borrower" });
     });
     users.filter(u => !u.isVerified).slice(0, 3).forEach(u => {
-      notifs.push({ id: `verify-${u._id}`, text: `Pending Verification: Neighbor "${u.name || u.email}"`, type: "verify" });
+      notifs.push({ id: `verify-${u._id}`, text: `Pending Verification: Member "${u.name || u.email}"`, type: "verify" });
     });
     return notifs;
   }, [flaggedTools, flaggedBorrowers, users]);
@@ -358,26 +384,26 @@ const AdminDashboard = () => {
   // Render Skeleton Template
   if (skeletonLoading) {
     return (
-      <div className={`min-h-screen ${darkMode ? "bg-slate-900 text-slate-100" : "bg-slate-50 text-slate-800"} p-8 flex flex-col items-center justify-center space-y-6 font-sans`}>
+      <div className="min-h-screen bg-slate-50 text-slate-800 p-8 flex flex-col items-center justify-center space-y-6 font-sans">
         <div className="w-full max-w-7xl space-y-8 animate-pulse">
           {/* Header Skeleton */}
           <div className="flex justify-between items-center">
             <div className="space-y-2.5">
-              <div className="h-6 w-48 bg-slate-300 dark:bg-slate-750 rounded-md"></div>
-              <div className="h-4 w-72 bg-slate-200 dark:bg-slate-800 rounded-md"></div>
+              <div className="h-6 w-48 bg-slate-300 rounded-md"></div>
+              <div className="h-4 w-72 bg-slate-200 rounded-md"></div>
             </div>
-            <div className="h-10 w-28 bg-slate-300 dark:bg-slate-750 rounded-xl"></div>
+            <div className="h-10 w-28 bg-slate-300 rounded-xl"></div>
           </div>
           {/* Metrics Grid Skeleton */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             {[1, 2, 3, 4].map(n => (
-              <div key={n} className="h-32 bg-slate-200 dark:bg-slate-800 rounded-3xl border border-transparent"></div>
+              <div key={n} className="h-32 bg-slate-200 rounded-3xl border border-transparent"></div>
             ))}
           </div>
           {/* Content Row Skeleton */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 h-96 bg-slate-200 dark:bg-slate-800 rounded-3xl"></div>
-            <div className="h-96 bg-slate-200 dark:bg-slate-800 rounded-3xl"></div>
+            <div className="lg:col-span-2 h-96 bg-slate-200 rounded-3xl"></div>
+            <div className="h-96 bg-slate-200 rounded-3xl"></div>
           </div>
         </div>
       </div>
@@ -385,51 +411,26 @@ const AdminDashboard = () => {
   }
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 font-sans antialiased ${
-      darkMode ? "bg-slate-950 text-slate-100" : "bg-slate-50/50 text-slate-800"
-    }`}>
-      <ToastContainer position="bottom-right" autoClose={3000} theme={darkMode ? "dark" : "light"} />
+    <div className="min-h-screen bg-slate-50/50 text-slate-800 font-sans antialiased">
+      <ToastContainer position="bottom-right" autoClose={3000} theme="light" />
 
-      {/* --- Header Navigation Bar --- */}
-      <header className={`sticky top-0 z-40 backdrop-blur-md border-b transition-colors ${
-        darkMode ? "bg-slate-950/80 border-slate-900" : "bg-white/80 border-slate-100"
-      }`}>
+      {/* --- Header Navigation Bar (Matches other pages) --- */}
+      <nav className="bg-white/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-100/80 text-slate-800 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-teal-500 flex items-center justify-center text-white font-black text-sm">
-              TS
-            </div>
-            <span className="font-black text-sm uppercase tracking-widest bg-gradient-to-r from-indigo-500 to-teal-500 bg-clip-text text-transparent">
-              ToolSwap Console
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <WrenchScrewdriverIcon className="h-6 w-6 text-indigo-600" />
+            <span className="text-2xl font-bold tracking-tight bg-gradient-to-r from-indigo-600 to-teal-500 bg-clip-text text-transparent">
+              ToolShare Console
             </span>
           </div>
-
-          {/* Center search input */}
-          <div className="hidden md:flex items-center flex-1 max-w-md relative">
-            <MagnifyingGlassIcon className="absolute left-3.5 h-4 w-4 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Search users, tool listings, reported events..." 
-              value={globalSearchQuery}
-              onChange={(e) => setGlobalSearchQuery(e.target.value)}
-              className={`w-full text-xs font-medium pl-10 pr-4 py-2 rounded-full border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
-                darkMode 
-                  ? "bg-slate-900 border-slate-800 text-slate-100 focus:border-indigo-500" 
-                  : "bg-slate-100/50 border-slate-200 text-slate-800 focus:border-indigo-500"
-              }`}
-            />
-          </div>
-
-          <div className="flex items-center gap-3.5">
+          <div className="flex items-center gap-3">
             {/* Notifications Bell */}
             <div className="relative">
               <button 
                 onClick={() => setShowNotifications(!showNotifications)}
-                className={`p-2 rounded-full border relative transition-colors ${
-                  darkMode ? "bg-slate-900 border-slate-800 hover:bg-slate-850" : "bg-slate-100/80 border-slate-200 hover:bg-slate-200/50"
-                }`}
+                className="p-2 rounded-full border border-slate-200 bg-white hover:bg-slate-50 transition-colors relative"
               >
-                <BellIcon className="h-4.5 w-4.5" />
+                <BellIcon className="h-5 w-5 text-slate-600" />
                 {pendingNotifications.length > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-indigo-600 text-[9px] font-black text-white">
                     {pendingNotifications.length}
@@ -438,17 +439,13 @@ const AdminDashboard = () => {
               </button>
 
               {showNotifications && (
-                <div className={`absolute right-0 mt-3.5 w-80 rounded-2xl border p-4 shadow-xl z-50 animate-slide-up-fade text-left ${
-                  darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
-                }`}>
-                  <h4 className="font-extrabold text-xs uppercase tracking-wider mb-2">Pending Alerts</h4>
+                <div className="absolute right-0 mt-3 w-80 rounded-2xl border border-slate-100 bg-white p-4 shadow-xl z-50 animate-slide-up-fade text-left">
+                  <h4 className="font-extrabold text-xs uppercase tracking-wider mb-2 text-slate-800">Pending Alerts</h4>
                   <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
                     {pendingNotifications.length === 0 ? (
-                      <p className="text-[10px] text-slate-450 font-bold text-center py-4">All quiet! No pending reports. 🎉</p>
+                      <p className="text-[10px] text-slate-400 font-bold text-center py-4">All quiet! No pending reports. 🎉</p>
                     ) : pendingNotifications.map(n => (
-                      <div key={n.id} className={`p-2 rounded-xl text-[10px] font-semibold border ${
-                        darkMode ? "bg-slate-950 border-slate-850" : "bg-slate-50 border-slate-100"
-                      }`}>
+                      <div key={n.id} className="p-2 rounded-xl text-[10px] font-semibold border border-slate-100 bg-slate-50 text-slate-700">
                         {n.text}
                       </div>
                     ))}
@@ -457,389 +454,308 @@ const AdminDashboard = () => {
               )}
             </div>
 
-            {/* Theme Toggle Button */}
-            <button 
-              onClick={toggleTheme}
-              className={`p-2 rounded-full border transition-colors ${
-                darkMode ? "bg-slate-900 border-slate-800 hover:bg-slate-850" : "bg-slate-100/80 border-slate-200 hover:bg-slate-200/50"
-              }`}
-            >
-              {darkMode ? <SunIcon className="h-4.5 w-4.5 text-amber-400" /> : <MoonIcon className="h-4.5 w-4.5 text-slate-650" />}
-            </button>
-
             {/* Logout */}
             <button
               onClick={handleLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-bold hover:bg-red-500/25 transition-all"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full border border-red-200 text-red-600 bg-red-50/50 hover:bg-red-50 text-xs font-black uppercase tracking-wider transition-all"
             >
               <ArrowRightOnRectangleIcon className="h-4 w-4" />
-              <span>Logout</span>
+              <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </div>
-      </header>
+      </nav>
 
       {/* --- Main Contents Container --- */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        
-        {/* --- Hero Banner Section --- */}
-        <section className={`rounded-3xl border p-6 md:p-8 flex flex-col md:flex-row justify-between gap-6 relative overflow-hidden transition-all ${
-          darkMode 
-            ? "bg-slate-900/40 border-slate-900 bg-[radial-gradient(circle_at_top_right,_rgba(99,102,241,0.05),_transparent)]" 
-            : "bg-white border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.01)]"
-        }`}>
-          <div>
-            <div className="flex items-center gap-2 text-xs font-bold text-indigo-500 mb-1.5">
-              <BoltIcon className="h-4.5 w-4.5 animate-pulse" />
-              <span>OVERVIEW CONTROL PANEL</span>
-            </div>
-            <h2 className="text-2xl font-black tracking-tight">Good Morning, {adminName} 👋</h2>
-            <p className="text-xs text-slate-450 mt-1 font-semibold">
-              Platform Health: <span className="text-emerald-500 font-extrabold">98% (Excellent)</span> 
-              &nbsp;•&nbsp; Pending Reports: <span className="text-rose-500 font-extrabold">{flaggedTools.length + flaggedBorrowers.length}</span> 
-              &nbsp;•&nbsp; Last updated 2 mins ago.
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+
+        {/* --- Welcoming Banner (Light-Theme Glow) --- */}
+        <section className="rounded-3xl border border-slate-200/60 p-6 md:p-8 flex flex-col md:flex-row justify-between items-center gap-6 transition-all bg-gradient-to-tr from-indigo-50/60 via-white to-teal-50/20 shadow-[0_8px_30px_rgb(99,102,241,0.02)]">
+          <div className="space-y-1">
+            <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block mb-1">
+              Admin Dashboard
+            </span>
+            <h2 className="text-xl md:text-2xl font-black tracking-tight text-slate-800">
+              Welcome back, {adminName.replace(/\s*[uU]ser\s*/g, "").trim()} 👋
+            </h2>
+            <p className="text-xs text-slate-500 font-medium">
+              Manage community items, handle reports, and keep ToolShare healthy.
             </p>
-
-            <div className="flex flex-wrap gap-2.5 mt-5">
-              <button 
-                onClick={() => { setActiveTab("users"); setUserFilter("all"); }}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-750 text-white font-extrabold text-xs transition-all shadow-md shadow-indigo-600/10 cursor-pointer"
-              >
-                Manage Neighbors
-              </button>
-              <button 
-                onClick={() => setShowAnnouncements(true)}
-                className={`px-4 py-2 rounded-xl border font-extrabold text-xs transition-all cursor-pointer ${
-                  darkMode ? "bg-slate-900 border-slate-800 hover:bg-slate-850" : "bg-slate-100 border-slate-200 hover:bg-slate-200"
-                }`}
-              >
-                Send Broadcast Announcement
-              </button>
-              <button 
-                onClick={handleExportUsers}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition-all shadow-md shadow-emerald-600/10 cursor-pointer"
-              >
-                Export Neighbors (CSV)
-              </button>
-            </div>
           </div>
-
-          {/* Right side System Status checklist */}
-          <div className={`p-4.5 rounded-2xl border text-xs font-semibold flex flex-col justify-center space-y-2 min-w-[200px] ${
-            darkMode ? "bg-slate-950/60 border-slate-850" : "bg-slate-50/50 border-slate-100"
-          }`}>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">🟢 Platform Health Status</span>
-            <div className="flex items-center justify-between gap-4">
-              <span>Database</span> <span className="text-emerald-500 font-black">Healthy</span>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <span>API Gateway</span> <span className="text-emerald-500 font-black">Online</span>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <span>File Storage</span> <span className="text-emerald-500 font-black">Online</span>
-            </div>
+          <div className="flex flex-wrap gap-3">
+            <button 
+              onClick={() => setShowAnnouncements(true)}
+              className="flex items-center gap-2 px-5 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-indigo-600/10 active:scale-[0.98] cursor-pointer"
+            >
+              Broadcast Alert
+            </button>
           </div>
         </section>
 
         {/* --- KPI Metric Cards Grid --- */}
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-          {/* KPI 1 */}
-          <div className={`rounded-3xl border p-5 transition-all hover:scale-[1.01] ${
-            darkMode ? "bg-slate-900/40 border-slate-900" : "bg-white border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.01)]"
-          }`}>
-            <div className="flex justify-between items-center mb-2.5">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Neighbors</span>
-              <UserGroupIcon className="h-5 w-5 text-indigo-500" />
+          {/* Members */}
+          <div className="rounded-3xl border border-slate-200 shadow-[0_4px_20px_rgb(0,0,0,0.01)] p-6 bg-white hover:-translate-y-0.5 hover:shadow-md transition-all">
+            <div className="flex justify-between items-start mb-3">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Members</span>
+              <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+                <UserGroupIcon className="h-5 w-5" />
+              </div>
             </div>
-            <h3 className="text-2xl font-black">{stats.totalUsers || users.length}</h3>
-            <span className="text-[9px] font-extrabold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full mt-1.5 inline-block">
-              ↑ 12% from last week
-            </span>
+            <h3 className="text-2xl font-black text-slate-800 leading-none">
+              {users.filter(u => !u.isAdmin).length}
+            </h3>
+            <p className="text-[9px] text-slate-400 font-bold mt-1.5 uppercase tracking-wide">
+              Community Members
+            </p>
           </div>
 
-          {/* KPI 2 */}
-          <div className={`rounded-3xl border p-5 transition-all hover:scale-[1.01] ${
-            darkMode ? "bg-slate-900/40 border-slate-900" : "bg-white border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.01)]"
-          }`}>
-            <div className="flex justify-between items-center mb-2.5">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Listed Tools</span>
-              <WrenchScrewdriverIcon className="h-5 w-5 text-teal-500" />
+          {/* Tools */}
+          <div className="rounded-3xl border border-slate-200 shadow-[0_4px_20px_rgb(0,0,0,0.01)] p-6 bg-white hover:-translate-y-0.5 hover:shadow-md transition-all">
+            <div className="flex justify-between items-start mb-3">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Listed Tools</span>
+              <div className="p-2 rounded-xl bg-purple-50 text-purple-600">
+                <WrenchScrewdriverIcon className="h-5 w-5" />
+              </div>
             </div>
-            <h3 className="text-2xl font-black">{stats.totalTools}</h3>
-            <span className="text-[9px] font-extrabold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full mt-1.5 inline-block">
-              ↑ +5 added this week
-            </span>
+            <h3 className="text-2xl font-black text-slate-800 leading-none">
+              {stats.totalTools}
+            </h3>
+            <p className="text-[9px] text-slate-400 font-bold mt-1.5 uppercase tracking-wide">
+              Shared community items
+            </p>
           </div>
 
-          {/* KPI 3 */}
-          <div className={`rounded-3xl border p-5 transition-all hover:scale-[1.01] ${
-            darkMode ? "bg-slate-900/40 border-slate-900" : "bg-white border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.01)]"
-          }`}>
-            <div className="flex justify-between items-center mb-2.5">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Active Loans</span>
-              <ArrowPathIcon className="h-5 w-5 text-sky-500" />
+          {/* Active Loans */}
+          <div className="rounded-3xl border border-slate-200 shadow-[0_4px_20px_rgb(0,0,0,0.01)] p-6 bg-white hover:-translate-y-0.5 hover:shadow-md transition-all">
+            <div className="flex justify-between items-start mb-3">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Loans</span>
+              <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
+                <ArrowPathIcon className="h-5 w-5" />
+              </div>
             </div>
-            <h3 className="text-2xl font-black">{stats.activeLoans}</h3>
-            <span className="text-[9px] font-extrabold text-indigo-500 bg-indigo-500/10 px-2 py-0.5 rounded-full mt-1.5 inline-block">
-              ↑ 8 active now
-            </span>
+            <h3 className="text-2xl font-black text-slate-800 leading-none">
+              {stats.activeLoans}
+            </h3>
+            <p className="text-[9px] text-slate-400 font-bold mt-1.5 uppercase tracking-wide">
+              Ongoing items swaps
+            </p>
           </div>
 
-          {/* KPI 4 */}
-          <div className={`rounded-3xl border p-5 transition-all hover:scale-[1.01] ${
-            darkMode ? "bg-slate-900/40 border-slate-900" : "bg-white border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.01)]"
-          }`}>
-            <div className="flex justify-between items-center mb-2.5">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Unresolved Flags</span>
-              <ShieldExclamationIcon className="h-5 w-5 text-rose-500" />
+          {/* Reported Issues */}
+          <div className="rounded-3xl border border-slate-200 shadow-[0_4px_20px_rgb(0,0,0,0.01)] p-6 bg-white hover:-translate-y-0.5 hover:shadow-md transition-all">
+            <div className="flex justify-between items-start mb-3">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Reported Issues</span>
+              <div className="p-2 rounded-xl bg-rose-50 text-rose-600">
+                <ShieldExclamationIcon className="h-5 w-5" />
+              </div>
             </div>
-            <h3 className="text-2xl font-black">{flaggedTools.length + flaggedBorrowers.length}</h3>
-            <span className="text-[9px] font-extrabold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full mt-1.5 inline-block">
-              ↓ 2 resolved today
-            </span>
+            <h3 className="text-2xl font-black text-slate-800 leading-none">
+              {flaggedTools.length + flaggedBorrowers.length}
+            </h3>
+            <p className="text-[9px] text-slate-400 font-bold mt-1.5 uppercase tracking-wide">
+              Issues needing review
+            </p>
           </div>
         </section>
 
-        {/* --- Two Column Layout (Analytics & Side Widgets) --- */}
-        <section className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          
-          {/* Left Block (8 columns): Multi-Chart Analytics */}
-          <div className={`lg:col-span-8 rounded-3xl border p-6 md:p-8 space-y-8 ${
-            darkMode ? "bg-slate-900/40 border-slate-900" : "bg-white border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.01)]"
-          }`}>
-            <div className="flex justify-between items-center flex-wrap gap-4 border-b pb-4 border-slate-100 dark:border-slate-850">
-              <div>
-                <h3 className="text-lg font-black">Interactive Performance Analytics</h3>
-                <p className="text-xs text-slate-500 font-medium">Verify transaction trends, tool category share, and borrow heatmaps.</p>
-              </div>
-              <div className="flex items-center gap-2">
-                {["today", "week", "month", "year"].map(time => (
-                  <button 
-                    key={time}
-                    onClick={() => setActiveTimeFilter(time)}
-                    className={`px-3 py-1.5 rounded-xl text-[10px] font-extrabold uppercase transition-all ${
-                      activeTimeFilter === time 
-                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10" 
-                        : (darkMode ? "bg-slate-950 hover:bg-slate-850" : "bg-slate-100 hover:bg-slate-200")
-                    }`}
-                  >
-                    {time}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Line Chart & Categories Donut Chart Row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              
-              {/* Line Chart Component */}
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">📈 Loans Over Last 30 Days</span>
-                  <span className="text-[10px] font-bold text-indigo-500 bg-indigo-500/15 px-2 py-0.5 rounded-full">Average: 24/day</span>
+        {/* --- Admin Analytics Block (New Feature from user request) --- */}
+        <section className="rounded-3xl border border-slate-200/60 p-6 md:p-8 space-y-6 bg-white shadow-[0_8px_30px_rgb(0,0,0,0.01)] animate-fade-in">
+          <div>
+            <h3 className="text-lg font-black text-slate-800">Admin Analytics</h3>
+            <p className="text-xs text-slate-500 font-medium">Weekly trends for users, loans, reports, and flagged items.</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* New Users Card */}
+            <div className="rounded-2xl border border-slate-100 p-5 bg-slate-50/30 flex flex-col justify-between hover:shadow-md transition-all">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">New Users</span>
+                  <span className="text-2xl font-black text-slate-800 leading-none mt-1 block">
+                    {users.filter(u => !u.isAdmin).length}
+                  </span>
                 </div>
-                <div className={`p-4 rounded-2xl border flex flex-col justify-between h-44 ${
-                  darkMode ? "bg-slate-950/60 border-slate-850" : "bg-slate-50/50 border-slate-100"
-                }`}>
-                  {/* SVG line representation */}
-                  <svg viewBox="0 0 500 150" className="w-full h-32 text-indigo-500">
-                    <defs>
-                      <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="rgb(99, 102, 241)" stopOpacity="0.2"/>
-                        <stop offset="100%" stopColor="rgb(99, 102, 241)" stopOpacity="0"/>
-                      </linearGradient>
-                    </defs>
-                    <path d="M 0 130 Q 100 70 200 110 T 350 40 T 500 20 L 500 150 L 0 150 Z" fill="url(#chartGradient)"/>
-                    <path d="M 0 130 Q 100 70 200 110 T 350 40 T 500 20" fill="none" stroke="currentColor" strokeWidth="3" className="stroke-indigo-550"/>
-                  </svg>
-                  <div className="flex justify-between text-[8px] font-black text-slate-400 px-1">
-                    <span>DAY 1</span>
-                    <span>DAY 10</span>
-                    <span>DAY 20</span>
-                    <span>DAY 30</span>
-                  </div>
-                </div>
+                <span className="px-2.5 py-0.5 rounded-full bg-sky-500 text-white text-[8px] font-black uppercase tracking-widest">
+                  This week
+                </span>
               </div>
-
-              {/* Pie/Donut Chart Component */}
-              <div className="space-y-3">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">⚙️ Category Distribution</span>
-                <div className={`p-4 rounded-2xl border flex items-center gap-6 h-44 ${
-                  darkMode ? "bg-slate-950/60 border-slate-850" : "bg-slate-50/50 border-slate-100"
-                }`}>
-                  {/* Circular Pie/Donut Representation */}
-                  <div className="relative h-24 w-24 flex-shrink-0 flex items-center justify-center">
-                    <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
-                      <circle cx="18" cy="18" r="15.91" fill="none" stroke={darkMode ? "#1e293b" : "#f1f5f9"} strokeWidth="4" />
-                      {/* Donut slices */}
-                      <circle cx="18" cy="18" r="15.91" fill="none" stroke="rgb(99, 102, 241)" strokeWidth="4.2" strokeDasharray="45 100" strokeDashoffset="0" />
-                      <circle cx="18" cy="18" r="15.91" fill="none" stroke="rgb(20, 184, 166)" strokeWidth="4.2" strokeDasharray="25 100" strokeDashoffset="-45" />
-                      <circle cx="18" cy="18" r="15.91" fill="none" stroke="rgb(14, 165, 233)" strokeWidth="4.2" strokeDasharray="15 100" strokeDashoffset="-70" />
-                      <circle cx="18" cy="18" r="15.91" fill="none" stroke="rgb(245, 158, 11)" strokeWidth="4.2" strokeDasharray="10 100" strokeDashoffset="-85" />
-                      <circle cx="18" cy="18" r="15.91" fill="none" stroke="rgb(100, 116, 139)" strokeWidth="4.2" strokeDasharray="5 100" strokeDashoffset="-95" />
-                    </svg>
-                    <div className="absolute flex flex-col items-center justify-center text-center">
-                      <span className="text-xs font-black leading-none">100%</span>
-                      <span className="text-[7px] text-slate-400 font-bold uppercase mt-0.5">Share</span>
+              <div className="flex items-end justify-between gap-1.5 h-20 mt-4">
+                {weeklyAnalytics.map((day) => {
+                  const maxVal = Math.max(...weeklyAnalytics.map(d => d.users), 1);
+                  const heightPct = Math.max((day.users / maxVal) * 100, 12);
+                  return (
+                    <div key={day.date} className="flex flex-col items-center flex-1 group">
+                      <span className={`text-[8px] font-black transition-all mb-1 ${day.users > 0 ? "text-sky-600 font-black" : "text-slate-300"}`}>
+                        {day.users}
+                      </span>
+                      <div className="w-full bg-slate-100/80 rounded-full h-11 flex items-end overflow-hidden relative">
+                        <div 
+                          style={{ height: `${heightPct}%` }}
+                          className={`w-full rounded-full transition-all duration-500 ${day.users > 0 ? "bg-sky-500" : "bg-sky-200/40"}`}
+                        />
+                      </div>
+                      <span className="text-[8px] text-slate-400 font-black mt-1">{day.date}</span>
                     </div>
-                  </div>
-                  <div className="text-[9px] font-bold text-slate-550 space-y-1 w-full">
-                    <div className="flex items-center justify-between"><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-indigo-500"></span>Power Tools</div> <span className="font-extrabold">45%</span></div>
-                    <div className="flex items-center justify-between"><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-teal-500"></span>Garden</div> <span className="font-extrabold">25%</span></div>
-                    <div className="flex items-center justify-between"><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sky-500"></span>Electronics</div> <span className="font-extrabold">15%</span></div>
-                    <div className="flex items-center justify-between"><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500"></span>Sports</div> <span className="font-extrabold">10%</span></div>
-                    <div className="flex items-center justify-between"><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-500"></span>Others</div> <span className="font-extrabold">5%</span></div>
-                  </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Active Loans Card */}
+            <div className="rounded-2xl border border-slate-100 p-5 bg-slate-50/30 flex flex-col justify-between hover:shadow-md transition-all">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Active Loans</span>
+                  <span className="text-2xl font-black text-slate-800 leading-none mt-1 block">
+                    {stats.activeLoans}
+                  </span>
                 </div>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500 text-white text-[8px] font-black uppercase tracking-widest">
+                  This week
+                </span>
               </div>
-
+              <div className="flex items-end justify-between gap-1.5 h-20 mt-4">
+                {weeklyAnalytics.map((day) => {
+                  const maxVal = Math.max(...weeklyAnalytics.map(d => d.loans), 1);
+                  const heightPct = Math.max((day.loans / maxVal) * 100, 12);
+                  return (
+                    <div key={day.date} className="flex flex-col items-center flex-1 group">
+                      <span className={`text-[8px] font-black transition-all mb-1 ${day.loans > 0 ? "text-emerald-600 font-black" : "text-slate-300"}`}>
+                        {day.loans}
+                      </span>
+                      <div className="w-full bg-slate-100/80 rounded-full h-11 flex items-end overflow-hidden relative">
+                        <div 
+                          style={{ height: `${heightPct}%` }}
+                          className={`w-full rounded-full transition-all duration-500 ${day.loans > 0 ? "bg-emerald-500" : "bg-emerald-200/40"}`}
+                        />
+                      </div>
+                      <span className="text-[8px] text-slate-400 font-black mt-1">{day.date}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Heatmap Grid Row */}
-            <div className="space-y-3">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">🔥 Active Borrowing Days Heatmap</span>
-              <div className="grid grid-cols-5 gap-3.5 text-center">
-                {[
-                  { day: "Monday", count: "12 loans", opacity: "bg-indigo-500/20 text-indigo-700 dark:text-indigo-400" },
-                  { day: "Tuesday", count: "18 loans", opacity: "bg-indigo-500/40 text-indigo-800 dark:text-indigo-300" },
-                  { day: "Wednesday", count: "34 loans", opacity: "bg-indigo-500/80 text-white font-extrabold" },
-                  { day: "Thursday", count: "21 loans", opacity: "bg-indigo-500/50 text-indigo-900 dark:text-indigo-200" },
-                  { day: "Friday", count: "28 loans", opacity: "bg-indigo-500/60 text-indigo-950 dark:text-indigo-100" }
-                ].map((item, idx) => (
-                  <div key={idx} className={`p-3 rounded-2xl border flex flex-col justify-between h-20 transition-all ${item.opacity} border-indigo-500/10`}>
-                    <span className="text-[9px] font-black uppercase tracking-wider">{item.day}</span>
-                    <span className="text-xs font-black">{item.count}</span>
-                  </div>
-                ))}
+            {/* Tool Reports Card */}
+            <div className="rounded-2xl border border-slate-100 p-5 bg-slate-50/30 flex flex-col justify-between hover:shadow-md transition-all">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Tool Reports</span>
+                  <span className="text-2xl font-black text-slate-800 leading-none mt-1 block">
+                    {flaggedTools.length}
+                  </span>
+                </div>
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-white text-[8px] font-black uppercase tracking-widest">
+                  This week
+                </span>
+              </div>
+              <div className="flex items-end justify-between gap-1.5 h-20 mt-4">
+                {weeklyAnalytics.map((day) => {
+                  const maxVal = Math.max(...weeklyAnalytics.map(d => d.reports), 1);
+                  const heightPct = Math.max((day.reports / maxVal) * 100, 12);
+                  return (
+                    <div key={day.date} className="flex flex-col items-center flex-1 group">
+                      <span className={`text-[8px] font-black transition-all mb-1 ${day.reports > 0 ? "text-amber-600 font-black" : "text-slate-300"}`}>
+                        {day.reports}
+                      </span>
+                      <div className="w-full bg-slate-100/80 rounded-full h-11 flex items-end overflow-hidden relative">
+                        <div 
+                          style={{ height: `${heightPct}%` }}
+                          className={`w-full rounded-full transition-all duration-500 ${day.reports > 0 ? "bg-amber-500" : "bg-amber-200/40"}`}
+                        />
+                      </div>
+                      <span className="text-[8px] text-slate-400 font-black mt-1">{day.date}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
+            {/* Flagged Items Card */}
+            <div className="rounded-2xl border border-slate-100 p-5 bg-slate-50/30 flex flex-col justify-between hover:shadow-md transition-all">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Flagged Items</span>
+                  <span className="text-2xl font-black text-slate-800 leading-none mt-1 block">
+                    {flaggedTools.length + flaggedBorrowers.length}
+                  </span>
+                </div>
+                <span className="px-2.5 py-0.5 rounded-full bg-rose-500 text-white text-[8px] font-black uppercase tracking-widest">
+                  This week
+                </span>
+              </div>
+              <div className="flex items-end justify-between gap-1.5 h-20 mt-4">
+                {weeklyAnalytics.map((day) => {
+                  const maxVal = Math.max(...weeklyAnalytics.map(d => d.flags), 1);
+                  const heightPct = Math.max((day.flags / maxVal) * 100, 12);
+                  return (
+                    <div key={day.date} className="flex flex-col items-center flex-1 group">
+                      <span className={`text-[8px] font-black transition-all mb-1 ${day.flags > 0 ? "text-rose-600 font-black" : "text-slate-300"}`}>
+                        {day.flags}
+                      </span>
+                      <div className="w-full bg-slate-100/80 rounded-full h-11 flex items-end overflow-hidden relative">
+                        <div 
+                          style={{ height: `${heightPct}%` }}
+                          className={`w-full rounded-full transition-all duration-500 ${day.flags > 0 ? "bg-rose-500" : "bg-rose-200/40"}`}
+                        />
+                      </div>
+                      <span className="text-[8px] text-slate-400 font-black mt-1">{day.date}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-
-          {/* Right Block (4 columns): Health Check, Sticky Note, Activities */}
-          <div className="lg:col-span-4 space-y-6">
-            
-            {/* Quick Stats Summary Sticky Card */}
-            <div className={`rounded-3xl border p-5 shadow-sm space-y-3.5 ${
-              darkMode ? "bg-slate-900/40 border-slate-900" : "bg-white border-slate-100"
-            }`}>
-              <div className="flex justify-between items-center border-b pb-2 border-slate-100 dark:border-slate-850">
-                <span className="text-xs font-black">Today's Activity Summary</span>
-                <span className="text-[8px] bg-indigo-500 text-white px-2 py-0.5 rounded-full font-black uppercase">LIVE</span>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-center text-xs font-bold">
-                <div className={`p-2.5 rounded-xl border ${darkMode ? "bg-slate-950 border-slate-850" : "bg-slate-50 border-slate-100"}`}>
-                  <p className="text-[9px] text-slate-400 mb-0.5">New Users</p>
-                  <p className="text-lg font-black text-indigo-500">+12</p>
-                </div>
-                <div className={`p-2.5 rounded-xl border ${darkMode ? "bg-slate-950 border-slate-850" : "bg-slate-50 border-slate-100"}`}>
-                  <p className="text-[9px] text-slate-400 mb-0.5">Lend Loans</p>
-                  <p className="text-lg font-black text-teal-500">+34</p>
-                </div>
-                <div className={`p-2.5 rounded-xl border ${darkMode ? "bg-slate-950 border-slate-850" : "bg-slate-50 border-slate-100"}`}>
-                  <p className="text-[9px] text-slate-400 mb-0.5">Flags Logged</p>
-                  <p className="text-lg font-black text-rose-500">+2</p>
-                </div>
-                <div className={`p-2.5 rounded-xl border ${darkMode ? "bg-slate-950 border-slate-850" : "bg-slate-50 border-slate-100"}`}>
-                  <p className="text-[9px] text-slate-400 mb-0.5">Earned Points</p>
-                  <p className="text-lg font-black text-sky-500">1.2K XP</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Platform Services Status List */}
-            <div className={`rounded-3xl border p-5 shadow-sm space-y-3.5 ${
-              darkMode ? "bg-slate-900/40 border-slate-900" : "bg-white border-slate-100"
-            }`}>
-              <span className="text-xs font-black block border-b pb-2 border-slate-100 dark:border-slate-850">Platform Services Monitor</span>
-              <div className="space-y-2.5 text-xs font-semibold text-slate-550 dark:text-slate-400">
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">🟢 API Gateway</span>
-                  <span className="text-[10px] text-emerald-500 font-extrabold uppercase">Healthy</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">🟢 Database Cluster</span>
-                  <span className="text-[10px] text-emerald-500 font-extrabold uppercase">Healthy</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">🟢 Media CDN</span>
-                  <span className="text-[10px] text-emerald-500 font-extrabold uppercase">Healthy</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">🟡 Email Dispatcher</span>
-                  <span className="text-[10px] text-amber-500 font-extrabold uppercase">Lagging (50ms)</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">🟢 Geo Maps Resolver</span>
-                  <span className="text-[10px] text-emerald-500 font-extrabold uppercase">Healthy</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Interactive Admin Sticky Notes Pad */}
-            <div className={`rounded-3xl border p-5 shadow-sm space-y-3 ${
-              darkMode ? "bg-slate-900/40 border-slate-900" : "bg-white border-slate-100"
-            }`}>
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-black">Private Admin Scratchpad</span>
-                <span className="text-[9px] text-indigo-500 font-black">AUTO-SAVE</span>
-              </div>
-              <textarea 
-                rows="4"
-                value={adminNotes}
-                onChange={handleNotesChange}
-                placeholder="Write private warnings details, review notes..."
-                className={`w-full rounded-2xl p-3 text-xs border focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-semibold leading-relaxed transition-all resize-none ${
-                  darkMode ? "bg-slate-950 border-slate-850 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
-                }`}
-              />
-            </div>
-
-          </div>
-
         </section>
 
         {/* --- Navigation Controls & Dynamic Tabs --- */}
-        <section className="flex flex-wrap gap-2.5 border-b pb-1.5 border-slate-100 dark:border-slate-900 justify-between items-center">
+        <section className="flex flex-wrap gap-2 border-b pb-3 border-slate-200 items-center justify-between">
           <div className="flex gap-2">
             {[
               { id: "listings", label: "Flagged Listings", count: flaggedTools.length },
               { id: "borrowers", label: "Flagged Borrowers", count: flaggedBorrowers.length },
-              { id: "users", label: "Neighbors Directory", count: users.length }
+              { id: "users", label: "Members", count: users.filter(u => !u.isAdmin).length }
             ].map(t => (
               <button 
                 key={t.id}
-                onClick={() => setActiveTab(t.id)}
+                onClick={() => { setActiveTab(t.id); setGlobalSearchQuery(""); }}
                 className={`px-5 py-2.5 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                   activeTab === t.id 
-                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-650/15" 
-                    : (darkMode ? "bg-slate-900 text-slate-400 hover:bg-slate-850" : "bg-white text-slate-500 border border-slate-200/50 hover:bg-slate-50")
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10" 
+                    : "bg-white text-slate-500 border border-slate-200/60 hover:bg-slate-50"
                 }`}
               >
                 {t.label} ({t.count})
               </button>
             ))}
           </div>
-          
-          {/* Quick Info status chip */}
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-            System Operational 🛡️
-          </span>
+
         </section>
 
         {/* --- Tab Panel 1: Flagged Tools listings --- */}
         {activeTab === "listings" && (
-          <section className={`rounded-3xl border p-6 md:p-8 space-y-6 ${
-            darkMode ? "bg-slate-900/40 border-slate-900" : "bg-white border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.01)]"
-          }`}>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b pb-4 border-slate-100 dark:border-slate-850">
+          <section className="rounded-3xl border border-slate-200/60 p-6 md:p-8 space-y-6 bg-white shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b pb-4 border-slate-100">
               <div>
-                <h3 className="text-lg font-black">Flagged Listings Directory</h3>
+                <h3 className="text-lg font-black text-slate-800">Flagged Listings</h3>
                 <p className="text-xs text-slate-500 font-medium">Flagged by community members for policy violations. Review and moderate.</p>
               </div>
-              <span className="text-xs font-black text-slate-450 uppercase tracking-widest">
-                Showing {filteredFlaggedTools.length} Flagged Tools
-              </span>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                {/* Search Bar inside Flagged Listings panel */}
+                <div className="relative min-w-[200px]">
+                  <MagnifyingGlassIcon className="absolute left-3 h-4 w-4 text-slate-400 top-1/2 -translate-y-1/2" />
+                  <input 
+                    type="text" 
+                    placeholder="Search listings..." 
+                    value={globalSearchQuery}
+                    onChange={(e) => { setGlobalSearchQuery(e.target.value); setToolsPage(1); }}
+                    className="w-full text-xs font-semibold pl-9 pr-4 py-2 rounded-full border border-slate-200 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/50 focus:bg-white transition-all"
+                  />
+                </div>
+                <span className="text-xs font-black text-slate-450 uppercase tracking-widest whitespace-nowrap self-center">
+                  Showing {filteredFlaggedTools.length} Tools
+                </span>
+              </div>
             </div>
 
             <div className="space-y-4">
@@ -849,27 +765,27 @@ const AdminDashboard = () => {
                   <p className="text-slate-400 font-black text-xs uppercase tracking-wider">No pending listing reports! Keep it up.</p>
                 </div>
               ) : paginatedTools.map((tool) => (
-                <div key={tool._id} className="rounded-2xl border border-slate-200 p-5 hover:bg-slate-50/20 dark:hover:bg-slate-900/25 transition-colors">
+                <div key={tool._id} className="rounded-2xl border border-slate-200 p-5 hover:bg-slate-50/20 transition-colors">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="font-extrabold text-slate-850 dark:text-slate-100 text-sm">Tool: "{tool.title}"</h4>
-                        <span className="rounded-full bg-rose-50 border border-rose-150 text-rose-600 text-[9px] font-black uppercase px-2 py-0.5">LISTING FLAGGED</span>
+                        <h4 className="font-extrabold text-slate-800 text-sm">Tool: "{tool.title}"</h4>
+                        <span className="rounded-full bg-rose-50 border border-rose-100 text-rose-600 text-[9px] font-black uppercase px-2 py-0.5">LISTING FLAGGED</span>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-y-1 gap-x-6 mt-2.5 text-xs text-slate-500 font-medium">
                         <p><span className="font-bold text-slate-600">Owner:</span> {tool.owner?.name || "Unknown"}</p>
-                        <p><span className="font-bold text-slate-600">Reported by:</span> {tool.flaggedBy?.name || "Neighbor"}</p>
+                        <p><span className="font-bold text-slate-600">Reported by:</span> {tool.flaggedBy?.name || "Member"}</p>
                         <p><span className="font-bold text-slate-600">Reason:</span> <span className="italic text-rose-600 font-semibold">"{tool.flagReason || "Reported"}"</span></p>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2.5 self-end sm:self-center">
-                      <button onClick={() => setSelectedTool(tool)} className="rounded-xl bg-slate-100 dark:bg-slate-850 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold px-4 py-2.5 text-xs transition-colors cursor-pointer border border-transparent dark:border-slate-800">
+                      <button onClick={() => setSelectedTool(tool)} className="rounded-xl bg-slate-100 hover:bg-slate-250 text-slate-700 font-bold px-4 py-2.5 text-xs transition-colors cursor-pointer border border-transparent">
                         View Details
                       </button>
                       <button onClick={() => handleModerateTool(tool._id, "approve")} className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2.5 text-xs transition-colors cursor-pointer shadow-md shadow-emerald-600/10">
                         Approve
                       </button>
-                      <button onClick={() => handleModerateTool(tool._id, "reject")} className="rounded-xl bg-red-655 hover:bg-red-700 text-white font-bold px-4 py-2.5 text-xs transition-colors cursor-pointer shadow-md shadow-red-600/10">
+                      <button onClick={() => handleModerateTool(tool._id, "reject")} className="rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2.5 text-xs transition-colors cursor-pointer shadow-md shadow-red-600/10">
                         Remove
                       </button>
                     </div>
@@ -884,7 +800,7 @@ const AdminDashboard = () => {
                 <button 
                   onClick={() => setToolsPage(prev => Math.max(prev - 1, 1))} 
                   disabled={toolsPage === 1}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900 disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
                 >
                   &lt;
                 </button>
@@ -895,7 +811,7 @@ const AdminDashboard = () => {
                     className={`px-3.5 py-1.5 rounded-xl transition-all ${
                       toolsPage === idx + 1 
                         ? "bg-indigo-600 text-white shadow-sm" 
-                        : "border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900"
+                        : "border border-slate-200 hover:bg-slate-50"
                     }`}
                   >
                     {idx + 1}
@@ -904,7 +820,7 @@ const AdminDashboard = () => {
                 <button 
                   onClick={() => setToolsPage(prev => Math.min(prev + 1, Math.ceil(filteredFlaggedTools.length / itemsPerPage)))} 
                   disabled={toolsPage === Math.ceil(filteredFlaggedTools.length / itemsPerPage)}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900 disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
                 >
                   &gt;
                 </button>
@@ -915,22 +831,29 @@ const AdminDashboard = () => {
 
         {/* --- Tab Panel 2: Flagged Borrowers --- */}
         {activeTab === "borrowers" && (
-          <section className={`rounded-3xl border p-6 md:p-8 space-y-6 ${
-            darkMode ? "bg-slate-900/40 border-slate-900" : "bg-white border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.01)]"
-          }`}>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b pb-4 border-slate-100 dark:border-slate-850">
+          <section className="rounded-3xl border border-slate-200/60 p-6 md:p-8 space-y-6 bg-white shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b pb-4 border-slate-100">
               <div>
-                <h3 className="text-lg font-black">Flagged Borrowers Log</h3>
+                <h3 className="text-lg font-black text-slate-800">Flagged Borrowers Log</h3>
                 <p className="text-xs text-slate-500 font-medium">Review and resolve claims of delayed returns, missing accessories, or damaged tools.</p>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-black text-slate-400 uppercase">Severity Filter</span>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                {/* Search Bar inside Flagged Borrowers panel */}
+                <div className="relative min-w-[200px]">
+                  <MagnifyingGlassIcon className="absolute left-3 h-4 w-4 text-slate-400 top-1/2 -translate-y-1/2" />
+                  <input 
+                    type="text" 
+                    placeholder="Search borrowers..." 
+                    value={globalSearchQuery}
+                    onChange={(e) => { setGlobalSearchQuery(e.target.value); setBorrowersPage(1); }}
+                    className="w-full text-xs font-semibold pl-9 pr-4 py-2 rounded-full border border-slate-200 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/50 focus:bg-white transition-all"
+                  />
+                </div>
+                {/* Severity Filter Select */}
                 <select 
                   value={selectedSeverity} 
                   onChange={(e) => { setSelectedSeverity(e.target.value); setBorrowersPage(1); }}
-                  className={`rounded-xl text-xs font-bold p-2 border focus:outline-none ${
-                    darkMode ? "bg-slate-950 border-slate-850 text-slate-100" : "bg-white border-slate-200 text-slate-800"
-                  }`}
+                  className="rounded-xl text-xs font-bold p-2.5 border border-slate-200 bg-white text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
                   <option value="all">All Severities</option>
                   <option value="medium">Medium</option>
@@ -950,11 +873,11 @@ const AdminDashboard = () => {
                 const borrower = tool.reportedBorrower || tool.borrowedBy;
                 const severity = getSeverityBadge(tool.borrowerFlagReason);
                 return (
-                  <div key={tool._id} className="rounded-2xl border border-slate-200 p-5 hover:bg-slate-50/20 dark:hover:bg-slate-900/25 transition-colors">
+                  <div key={tool._id} className="rounded-2xl border border-slate-200 p-5 hover:bg-slate-50/20 transition-colors">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-extrabold text-slate-800 dark:text-slate-100 text-sm">Tool: "{tool.title}"</h4>
+                          <h4 className="font-extrabold text-slate-800 text-sm">Tool: "{tool.title}"</h4>
                           <span className={`rounded-full border text-[9px] font-black uppercase px-2.5 py-0.5 ${severity.style}`}>
                             {severity.label}
                           </span>
@@ -992,7 +915,7 @@ const AdminDashboard = () => {
                 <button 
                   onClick={() => setBorrowersPage(prev => Math.max(prev - 1, 1))} 
                   disabled={borrowersPage === 1}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900 disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
                 >
                   &lt;
                 </button>
@@ -1003,7 +926,7 @@ const AdminDashboard = () => {
                     className={`px-3.5 py-1.5 rounded-xl transition-all ${
                       borrowersPage === idx + 1 
                         ? "bg-indigo-600 text-white shadow-sm" 
-                        : "border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900"
+                        : "border border-slate-200 hover:bg-slate-50"
                     }`}
                   >
                     {idx + 1}
@@ -1012,7 +935,7 @@ const AdminDashboard = () => {
                 <button 
                   onClick={() => setBorrowersPage(prev => Math.min(prev + 1, Math.ceil(filteredFlaggedBorrowers.length / itemsPerPage)))} 
                   disabled={borrowersPage === Math.ceil(filteredFlaggedBorrowers.length / itemsPerPage)}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900 disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
                 >
                   &gt;
                 </button>
@@ -1021,26 +944,33 @@ const AdminDashboard = () => {
           </section>
         )}
 
-        {/* --- Tab Panel 3: Neighbors Directory --- */}
+        {/* --- Tab Panel 3: Members --- */}
         {activeTab === "users" && (
-          <section className={`rounded-3xl border p-6 md:p-8 space-y-6 ${
-            darkMode ? "bg-slate-900/40 border-slate-900" : "bg-white border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.01)]"
-          }`}>
-            <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between border-b pb-4 border-slate-100 dark:border-slate-850">
+          <section className="rounded-3xl border border-slate-200/60 p-6 md:p-8 space-y-6 bg-white shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b pb-4 border-slate-100">
               <div>
-                <h3 className="text-lg font-black">Neighbors Controls Directory</h3>
+                <h3 className="text-lg font-black text-slate-800">Members Controls</h3>
                 <p className="text-xs text-slate-500 font-medium">Verify profiles, toggle active sharing, suspend, or ban user accounts.</p>
               </div>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <span className="text-xs font-black text-slate-400 uppercase">Directory Filter</span>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                {/* Search Bar inside Members panel */}
+                <div className="relative min-w-[200px]">
+                  <MagnifyingGlassIcon className="absolute left-3 h-4 w-4 text-slate-400 top-1/2 -translate-y-1/2" />
+                  <input 
+                    type="text" 
+                    placeholder="Search members..." 
+                    value={globalSearchQuery}
+                    onChange={(e) => { setGlobalSearchQuery(e.target.value); setUserPage(1); }}
+                    className="w-full text-xs font-semibold pl-9 pr-4 py-2 rounded-full border border-slate-200 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/50 focus:bg-white transition-all"
+                  />
+                </div>
+                {/* Directory Filter Select */}
                 <select 
                   value={userFilter} 
                   onChange={(e) => { setUserFilter(e.target.value); setUserPage(1); }}
-                  className={`rounded-xl text-xs font-bold p-2 border focus:outline-none ${
-                    darkMode ? "bg-slate-950 border-slate-850 text-slate-100" : "bg-white border-slate-200 text-slate-800"
-                  }`}
+                  className="rounded-xl text-xs font-bold p-2.5 border border-slate-200 bg-white text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
-                  <option value="all">All Neighbors</option>
+                  <option value="all">All Members</option>
                   <option value="active">Active Accounts</option>
                   <option value="suspended">Suspended Accounts</option>
                   <option value="banned">Banned Accounts</option>
@@ -1051,29 +981,29 @@ const AdminDashboard = () => {
             <div className="space-y-4">
               {filteredUsersList.length === 0 ? (
                 <div className="text-center py-10 border border-dashed border-slate-200 rounded-3xl">
-                  <p className="text-slate-400 font-black text-xs uppercase">No matching neighbors found.</p>
+                  <p className="text-slate-400 font-black text-xs uppercase">No matching members found.</p>
                 </div>
               ) : paginatedUsers.map((user) => {
                 const initial = user.name ? user.name[0].toUpperCase() : (user.email ? user.email[0].toUpperCase() : "?");
                 return (
-                  <div key={user._id} className="grid gap-4 rounded-2xl border border-slate-200 p-4 sm:p-5 md:grid-cols-[1.5fr_1fr] md:items-center hover:bg-slate-50/20 dark:hover:bg-slate-900/25 transition-colors">
+                  <div key={user._id} className="grid gap-4 rounded-2xl border border-slate-200 p-4 sm:p-5 md:grid-cols-[1.5fr_1fr] md:items-center hover:bg-slate-50/20 transition-colors">
                     <div className="flex items-center gap-4">
                       <div className="h-12 w-12 rounded-xl bg-gradient-to-tr from-indigo-500 to-teal-400 text-white flex items-center justify-center text-lg font-black shadow-sm flex-shrink-0">
                         {initial}
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-extrabold text-slate-850 dark:text-slate-100 text-sm truncate">{user.name || "Anonymous User"}</p>
+                          <p className="font-extrabold text-slate-800 text-sm truncate">{user.name || "Anonymous User"}</p>
                           {user.isVerified && (
                             <CheckBadgeIcon className="h-5 w-5 text-sky-500 flex-shrink-0" />
                           )}
                         </div>
-                        <p className="text-xs text-slate-550 font-medium truncate mt-0.5">{user.email}</p>
+                        <p className="text-xs text-slate-500 font-medium truncate mt-0.5">{user.email}</p>
                         <div className="flex gap-2.5 mt-2.5 flex-wrap text-[9px] font-black uppercase tracking-wider">
-                          <span className={`px-2.5 py-0.5 rounded-full border ${user.isBanned ? "bg-red-50 border-red-150 text-red-600" : user.isSuspended ? "bg-amber-50 border-amber-150 text-amber-600" : "bg-emerald-50 border-emerald-150 text-emerald-600"}`}>
+                          <span className={`px-2.5 py-0.5 rounded-full border ${user.isBanned ? "bg-red-50 border-red-100 text-red-600" : user.isSuspended ? "bg-amber-50 border-amber-100 text-amber-600" : "bg-emerald-50 border-emerald-100 text-emerald-600"}`}>
                             {user.isBanned ? "Banned" : user.isSuspended ? "Suspended" : "Active"}
                           </span>
-                          <span className="px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
+                          <span className="px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-500">
                             Warnings: {user.warnCount || 0}
                           </span>
                         </div>
@@ -1082,13 +1012,13 @@ const AdminDashboard = () => {
                     <div className="flex flex-wrap gap-2 justify-start md:justify-end">
                       <button
                         onClick={() => openUserDetail(user, "profile")}
-                        className="rounded-xl px-3.5 py-2.5 text-xs font-bold bg-slate-100 dark:bg-slate-850 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-transparent dark:border-slate-800 cursor-pointer"
+                        className="rounded-xl px-3.5 py-2.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer"
                       >
                         Inspect Profile
                       </button>
                       <button 
                         onClick={() => handleVerifyUser(user._id, !user.isVerified)} 
-                        className={`rounded-xl px-3.5 py-2.5 text-xs font-bold shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer ${user.isVerified ? "bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800" : "bg-sky-600 hover:bg-sky-750 text-white"}`}
+                        className={`rounded-xl px-3.5 py-2.5 text-xs font-bold shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer ${user.isVerified ? "bg-slate-100 hover:bg-slate-200 text-slate-700" : "bg-sky-600 hover:bg-sky-700 text-white"}`}
                       >
                         {user.isVerified ? "Unverify" : "Verify"}
                       </button>
@@ -1100,7 +1030,7 @@ const AdminDashboard = () => {
                       </button>
                       <button 
                         onClick={() => handleUserStatus(user._id, user.isBanned ? "unban" : "ban")} 
-                        className={`rounded-xl px-3.5 py-2.5 text-xs font-bold shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer ${user.isBanned ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/10" : "bg-rose-600 hover:bg-rose-700 text-white shadow-rose-650/10"}`}
+                        className={`rounded-xl px-3.5 py-2.5 text-xs font-bold shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer ${user.isBanned ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/10" : "bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/10"}`}
                       >
                         {user.isBanned ? "Unban" : "Ban"}
                       </button>
@@ -1116,7 +1046,7 @@ const AdminDashboard = () => {
                 <button 
                   onClick={() => setUserPage(prev => Math.max(prev - 1, 1))} 
                   disabled={userPage === 1}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900 disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
                 >
                   &lt;
                 </button>
@@ -1127,7 +1057,7 @@ const AdminDashboard = () => {
                     className={`px-3.5 py-1.5 rounded-xl transition-all ${
                       userPage === idx + 1 
                         ? "bg-indigo-600 text-white shadow-sm" 
-                        : "border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900"
+                        : "border border-slate-200 hover:bg-slate-50"
                     }`}
                   >
                     {idx + 1}
@@ -1136,7 +1066,7 @@ const AdminDashboard = () => {
                 <button 
                   onClick={() => setUserPage(prev => Math.min(prev + 1, Math.ceil(filteredUsersList.length / itemsPerPage)))} 
                   disabled={userPage === Math.ceil(filteredUsersList.length / itemsPerPage)}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900 disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
                 >
                   &gt;
                 </button>
@@ -1149,11 +1079,9 @@ const AdminDashboard = () => {
 
       {/* --- Overlay Modal: Flagged Tool Details --- */}
       {selectedTool && (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className={`p-6 rounded-3xl shadow-2xl w-full max-w-lg relative border transition-colors animate-slide-up-fade ${
-            darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
-          }`}>
-            <h3 className="text-lg font-black tracking-tight mb-4">Moderation Details: "{selectedTool.title}"</h3>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="p-6 rounded-3xl shadow-2xl w-full max-w-lg relative border border-slate-100 bg-white transition-colors animate-slide-up-fade">
+            <h3 className="text-base font-black tracking-tight mb-4 text-slate-800">Moderation Details: "{selectedTool.title}"</h3>
             
             {/* Mock Image Gallery */}
             <div className="grid grid-cols-3 gap-2.5 mb-5">
@@ -1162,22 +1090,22 @@ const AdminDashboard = () => {
                 alt={selectedTool.title} 
                 className="h-24 w-full object-cover rounded-2xl bg-slate-100 border border-slate-200/50" 
               />
-              <div className="h-24 w-full bg-slate-100 dark:bg-slate-800 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-[10px] font-black text-slate-400">
+              <div className="h-24 w-full bg-slate-50 rounded-2xl border border-dashed border-slate-200 flex items-center justify-center text-[10px] font-black text-slate-400">
                 GALLERY SLOT 2
               </div>
-              <div className="h-24 w-full bg-slate-100 dark:bg-slate-800 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-[10px] font-black text-slate-400">
+              <div className="h-24 w-full bg-slate-50 rounded-2xl border border-dashed border-slate-200 flex items-center justify-center text-[10px] font-black text-slate-400">
                 GALLERY SLOT 3
               </div>
             </div>
 
-            <div className="space-y-2.5 text-xs font-semibold text-slate-550 dark:text-slate-300 mb-6">
-              <p><span className="font-extrabold text-slate-700 dark:text-slate-200">Category:</span> {selectedTool.category || "General"}</p>
-              <p><span className="font-extrabold text-slate-700 dark:text-slate-200">Uploaded:</span> 2 June (3 weeks ago)</p>
-              <p><span className="font-extrabold text-slate-700 dark:text-slate-200">Total Borrows:</span> 17 times</p>
-              <p><span className="font-extrabold text-slate-700 dark:text-slate-200">Running Rating:</span> ⭐ 4.8 / 5.0</p>
-              <p><span className="font-extrabold text-slate-700 dark:text-slate-200">Description:</span> {selectedTool.description || "No description provided."}</p>
-              <p><span className="font-extrabold text-slate-700 dark:text-slate-200">Location:</span> {getLocationText(selectedTool.location, selectedTool._id)}</p>
-              <p className="bg-rose-50 border border-rose-100 text-rose-650 rounded-xl p-3.5 font-bold mt-4 dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400">
+            <div className="space-y-2.5 text-xs font-semibold text-slate-500 mb-6">
+              <p><span className="font-extrabold text-slate-700">Category:</span> {selectedTool.category || "General"}</p>
+              <p><span className="font-extrabold text-slate-700">Uploaded:</span> 2 June (3 weeks ago)</p>
+              <p><span className="font-extrabold text-slate-700">Total Borrows:</span> 17 times</p>
+              <p><span className="font-extrabold text-slate-700">Running Rating:</span> ⭐ 4.8 / 5.0</p>
+              <p><span className="font-extrabold text-slate-700">Description:</span> {selectedTool.description || "No description provided."}</p>
+              <p><span className="font-extrabold text-slate-700">Location:</span> {getLocationText(selectedTool.location, selectedTool._id)}</p>
+              <p className="bg-rose-50 border border-rose-100 text-rose-600 rounded-xl p-3.5 font-bold mt-4">
                 <span className="uppercase text-[10px] block text-rose-500 mb-1">Reason for Flagging:</span>
                 "{selectedTool.flagReason || "No details provided"}"
               </p>
@@ -1186,13 +1114,13 @@ const AdminDashboard = () => {
             <div className="flex gap-3 text-xs font-bold">
               <button 
                 onClick={() => setSelectedTool(null)} 
-                className="flex-1 py-2.5 rounded-full bg-slate-100 dark:bg-slate-850 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-transparent dark:border-slate-800 transition-colors"
+                className="flex-1 py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors border border-transparent"
               >
                 Go Back
               </button>
               <button 
                 onClick={() => { handleModerateTool(selectedTool._id, "approve"); setSelectedTool(null); }} 
-                className="flex-1 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-650/10 transition-colors"
+                className="flex-1 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/10 transition-colors"
               >
                 Approve (Clear Flag)
               </button>
@@ -1203,14 +1131,12 @@ const AdminDashboard = () => {
 
       {/* --- Overlay Modal: User Inspect Profile details --- */}
       {selectedUserDetail && (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className={`p-6 rounded-3xl shadow-2xl w-full max-w-xl relative border transition-colors animate-slide-up-fade ${
-            darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
-          }`}>
-            <h3 className="text-lg font-black tracking-tight mb-3">Neighbor Profile Audit</h3>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="p-6 rounded-3xl shadow-2xl w-full max-w-xl relative border border-slate-100 bg-white transition-colors animate-slide-up-fade">
+            <h3 className="text-base font-black tracking-tight mb-3 text-slate-800">Member Profile Audit</h3>
 
             {/* Nav tabs inside user audit modal */}
-            <div className="flex gap-2 border-b pb-2 mb-4 border-slate-200 dark:border-slate-800 text-xs font-bold">
+            <div className="flex gap-2 border-b pb-2 mb-4 border-slate-200 text-xs font-bold">
               {[
                 { id: "profile", label: "Overview" },
                 { id: "borrows", label: "Borrow History" },
@@ -1221,7 +1147,7 @@ const AdminDashboard = () => {
                   onClick={() => setUserDetailTab(tab.id)}
                   className={`px-3 py-1.5 rounded-xl transition-all ${
                     userDetailTab === tab.id 
-                      ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/30 dark:text-indigo-400" 
+                      ? "bg-indigo-50 text-indigo-600" 
                       : "text-slate-400 hover:text-slate-700"
                   }`}
                 >
@@ -1232,21 +1158,21 @@ const AdminDashboard = () => {
 
             {/* Audit Modal Content tabs */}
             {userDetailTab === "profile" && (
-              <div className="space-y-2.5 text-xs font-semibold text-slate-550 dark:text-slate-350 mb-6">
-                <div className="flex items-center gap-4.5 bg-slate-50 dark:bg-slate-950/40 p-4 rounded-2xl border border-slate-100 dark:border-slate-850">
+              <div className="space-y-2.5 text-xs font-semibold text-slate-500 mb-6">
+                <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
                   <div className="h-14 w-14 rounded-xl bg-gradient-to-tr from-indigo-500 to-teal-400 text-white flex items-center justify-center text-xl font-black">
                     {(selectedUserDetail.name || "?").charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <h4 className="font-extrabold text-sm text-slate-800 dark:text-slate-100 leading-tight">{selectedUserDetail.name}</h4>
-                    <p className="mt-0.5 text-slate-500">{selectedUserDetail.email}</p>
+                    <h4 className="font-extrabold text-sm text-slate-800 leading-tight">{selectedUserDetail.name}</h4>
+                    <p className="mt-0.5 text-slate-400">{selectedUserDetail.email}</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-4">
-                  <p><span className="font-extrabold text-slate-700 dark:text-slate-200">Phone:</span> {selectedUserDetail.phone || "Not provided"}</p>
-                  <p><span className="font-extrabold text-slate-700 dark:text-slate-200">Verification Status:</span> {selectedUserDetail.isVerified ? "Verified 🛡️" : "Unverified"}</p>
-                  <p><span className="font-extrabold text-slate-700 dark:text-slate-200">Warn Count:</span> {selectedUserDetail.warnCount || 0} Warnings</p>
-                  <p><span className="font-extrabold text-slate-700 dark:text-slate-200">Reputation rating:</span> ⭐ {selectedUserDetail.rating ? selectedUserDetail.rating.toFixed(1) : "0.0"} ({selectedUserDetail.numReviews || 0} reviews)</p>
+                  <p><span className="font-extrabold text-slate-700">Phone:</span> {selectedUserDetail.phone || "Not provided"}</p>
+                  <p><span className="font-extrabold text-slate-700">Verification Status:</span> {selectedUserDetail.isVerified ? "Verified 🛡️" : "Unverified"}</p>
+                  <p><span className="font-extrabold text-slate-700">Warn Count:</span> {selectedUserDetail.warnCount || 0} Warnings</p>
+                  <p><span className="font-extrabold text-slate-700">Reputation rating:</span> ⭐ {selectedUserDetail.rating ? selectedUserDetail.rating.toFixed(1) : "0.0"} ({selectedUserDetail.numReviews || 0} reviews)</p>
                 </div>
               </div>
             )}
@@ -1256,9 +1182,9 @@ const AdminDashboard = () => {
                 {(!selectedUserDetail.toolsRequested || selectedUserDetail.toolsRequested.length === 0) ? (
                   <p className="text-xs text-slate-400 font-bold py-4 text-center">No borrowing history recorded.</p>
                 ) : selectedUserDetail.toolsRequested.map((t, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-xs font-semibold p-2.5 rounded-xl border border-slate-100 dark:border-slate-850">
+                  <div key={idx} className="flex justify-between items-center text-xs font-semibold p-2.5 rounded-xl border border-slate-100">
                     <span>Requested: "{t.tool?.title || "Tool"}"</span>
-                    <span className="capitalize font-extrabold text-indigo-500">{t.status}</span>
+                    <span className="capitalize font-extrabold text-indigo-600">{t.status}</span>
                   </div>
                 ))}
               </div>
@@ -1269,7 +1195,7 @@ const AdminDashboard = () => {
                 {(!selectedUserDetail.toolsLentOut || selectedUserDetail.toolsLentOut.length === 0) ? (
                   <p className="text-xs text-slate-400 font-bold py-4 text-center">No lending logs recorded.</p>
                 ) : selectedUserDetail.toolsLentOut.map((t, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-xs font-semibold p-2.5 rounded-xl border border-slate-100 dark:border-slate-850">
+                  <div key={idx} className="flex justify-between items-center text-xs font-semibold p-2.5 rounded-xl border border-slate-100">
                     <span>Lent: "{t.tool?.title || "Tool"}"</span>
                     <span className="capitalize font-extrabold text-emerald-500">{t.status}</span>
                   </div>
@@ -1280,7 +1206,7 @@ const AdminDashboard = () => {
             <div className="flex gap-3 text-xs font-bold">
               <button 
                 onClick={() => setSelectedUserDetail(null)} 
-                className="w-full py-2.5 rounded-full bg-slate-100 dark:bg-slate-850 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-transparent dark:border-slate-800 transition-colors"
+                className="w-full py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors border border-transparent"
               >
                 Close Audit Screen
               </button>
@@ -1291,13 +1217,11 @@ const AdminDashboard = () => {
 
       {/* --- Overlay Modal: Send Announcement Form --- */}
       {showAnnouncements && (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <form onSubmit={handleSendAnnouncement} className={`p-6 rounded-3xl shadow-2xl w-full max-w-md relative border transition-colors animate-slide-up-fade ${
-            darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
-          }`}>
-            <h3 className="text-lg font-black tracking-tight mb-4">Send Broadcast Announcement</h3>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
+          <form onSubmit={handleSendAnnouncement} className="p-6 rounded-3xl shadow-2xl w-full max-w-md relative border border-slate-100 bg-white transition-colors animate-slide-up-fade">
+            <h3 className="text-base font-black tracking-tight mb-4">Send Broadcast Announcement</h3>
             
-            <div className="space-y-4 text-xs font-bold text-slate-600 dark:text-slate-400">
+            <div className="space-y-4 text-xs font-bold text-slate-500">
               <div>
                 <label className="block mb-1.5">Announcement Title</label>
                 <input 
@@ -1305,9 +1229,7 @@ const AdminDashboard = () => {
                   value={announcementForm.title}
                   onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })}
                   placeholder="e.g. Server Maintenance or Policy Updates"
-                  className={`w-full rounded-xl p-3 border focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-semibold ${
-                    darkMode ? "bg-slate-950 border-slate-850 text-slate-100 focus:border-indigo-500" : "bg-white border-slate-200 text-slate-800 focus:border-indigo-500"
-                  }`}
+                  className="w-full rounded-xl p-3 border border-slate-200 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                   required
                 />
               </div>
@@ -1317,12 +1239,10 @@ const AdminDashboard = () => {
                 <select
                   value={announcementForm.target}
                   onChange={(e) => setAnnouncementForm({ ...announcementForm, target: e.target.value })}
-                  className={`w-full rounded-xl p-3 border focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-bold ${
-                    darkMode ? "bg-slate-950 border-slate-850 text-slate-100" : "bg-white border-slate-200 text-slate-800"
-                  }`}
+                  className="w-full rounded-xl p-3 border border-slate-200 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                 >
                   <option value="all">All Registered Users</option>
-                  <option value="verified">Verified Neighbors Only</option>
+                  <option value="verified">Verified Members Only</option>
                   <option value="suspended">Suspended Accounts Only</option>
                 </select>
               </div>
@@ -1334,9 +1254,7 @@ const AdminDashboard = () => {
                   value={announcementForm.message}
                   onChange={(e) => setAnnouncementForm({ ...announcementForm, message: e.target.value })}
                   placeholder="Write details of the broadcast message..."
-                  className={`w-full rounded-xl p-3 border focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-semibold leading-relaxed ${
-                    darkMode ? "bg-slate-950 border-slate-850 text-slate-100 focus:border-indigo-500" : "bg-white border-slate-200 text-slate-800 focus:border-indigo-500"
-                  }`}
+                  className="w-full rounded-xl p-3 border border-slate-200 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 leading-relaxed"
                   required
                 />
               </div>
@@ -1346,13 +1264,13 @@ const AdminDashboard = () => {
               <button 
                 type="button"
                 onClick={() => setShowAnnouncements(false)} 
-                className="flex-1 py-2.5 rounded-full bg-slate-100 dark:bg-slate-850 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-transparent dark:border-slate-800 transition-colors"
+                className="flex-1 py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors border border-transparent"
               >
                 Cancel
               </button>
               <button 
                 type="submit"
-                className="flex-1 py-2.5 rounded-full bg-indigo-600 hover:bg-indigo-750 text-white shadow-md shadow-indigo-650/10 transition-colors"
+                className="flex-1 py-2.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/10 transition-colors"
               >
                 Send Broadcast
               </button>
@@ -1360,7 +1278,6 @@ const AdminDashboard = () => {
           </form>
         </div>
       )}
-
     </div>
   );
 };

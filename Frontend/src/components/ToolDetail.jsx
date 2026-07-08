@@ -2,7 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { jwtDecode } from "jwt-decode";
-import { StarIcon, ArrowLeftIcon, ChatBubbleBottomCenterTextIcon, HandRaisedIcon } from "@heroicons/react/24/solid";
+import { StarIcon, ArrowLeftIcon, ChatBubbleBottomCenterTextIcon, HandRaisedIcon, WrenchScrewdriverIcon } from "@heroicons/react/24/solid";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import Navbar from "./Navbar";
@@ -21,6 +21,8 @@ const ToolDetail = () => {
   const [reviews, setReviews] = useState([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [targetChat, setTargetChat] = useState({ user: null, tool: null });
+
+  const isOwner = user && tool && (user.id === tool.owner?._id || user.id === tool.owner);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -296,25 +298,37 @@ const ToolDetail = () => {
 
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-3 text-xs sm:text-sm font-bold pt-4 border-t border-slate-100">
-                <button
-                  onClick={handleRequestBorrow}
-                  disabled={!tool.available}
-                  className={`flex-1 py-3.5 rounded-full flex items-center justify-center gap-2 transition-all shadow-md ${
-                    tool.available
-                      ? "bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/10 hover:scale-[1.01]"
-                      : "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200/50"
-                  }`}
-                >
-                  <HandRaisedIcon className="h-5 w-5 flex-shrink-0" />
-                  {tool.available ? "Request to Borrow" : "Lent Out / Booked"}
-                </button>
-                <button
-                  onClick={handleMessageOwner}
-                  className="flex-1 py-3.5 rounded-full border border-indigo-200 text-indigo-600 bg-white hover:bg-indigo-50/50 transition-all flex items-center justify-center gap-2 hover:scale-[1.01]"
-                >
-                  <ChatBubbleBottomCenterTextIcon className="h-5 w-5 flex-shrink-0" />
-                  Message Owner
-                </button>
+                {isOwner ? (
+                  <button
+                    onClick={() => navigate(`/${user.name}`)}
+                    className="flex-1 py-3.5 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/10 hover:scale-[1.01] flex items-center justify-center gap-2 transition-all shadow-md"
+                  >
+                    <WrenchScrewdriverIcon className="h-5 w-5 flex-shrink-0" />
+                    Manage Tool in Profile
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleRequestBorrow}
+                      disabled={!tool.available}
+                      className={`flex-1 py-3.5 rounded-full flex items-center justify-center gap-2 transition-all shadow-md ${
+                        tool.available
+                          ? "bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/10 hover:scale-[1.01]"
+                          : "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200/50"
+                      }`}
+                    >
+                      <HandRaisedIcon className="h-5 w-5 flex-shrink-0" />
+                      {tool.available ? "Request to Borrow" : "Lent Out / Booked"}
+                    </button>
+                    <button
+                      onClick={handleMessageOwner}
+                      className="flex-1 py-3.5 rounded-full border border-indigo-200 text-indigo-600 bg-white hover:bg-indigo-50/50 transition-all flex items-center justify-center gap-2 hover:scale-[1.01]"
+                    >
+                      <ChatBubbleBottomCenterTextIcon className="h-5 w-5 flex-shrink-0" />
+                      Message Owner
+                    </button>
+                  </>
+                )}
               </div>
 
             </div>

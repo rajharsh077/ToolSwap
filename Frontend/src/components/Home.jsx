@@ -375,7 +375,7 @@ const Home = () => {
         const ratingB = b.owner?.rating || 0;
         const ratingA = a.owner?.rating || 0;
         if (ratingB !== ratingA) return ratingB - ratingA;
-        return (b.reviews?.length || 0) - (a.reviews?.length || 0);
+        return (b.borrowCount || 0) - (a.borrowCount || 0);
       });
     }
     if (activeTab === "near") {

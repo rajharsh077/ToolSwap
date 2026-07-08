@@ -101,7 +101,7 @@ const ListedToolCard = ({ tool, onToggle, onEdit, onDelete, navigate, getLocatio
 
             <div className="space-y-0.5 text-xs text-slate-550 font-semibold mb-2">
               <p className="truncate"><span className="text-slate-400">Category:</span> <span className="text-slate-700">{tool.category || "General"}</span></p>
-              <p><span className="text-slate-400">Stats:</span> <span className="text-indigo-600 font-bold">Borrowed {tool.reviews?.length || 0} times</span></p>
+              <p><span className="text-slate-400">Stats:</span> <span className="text-indigo-600 font-bold">Borrowed {tool.borrowCount || 0} times</span></p>
               <p><span className="text-slate-400">Added:</span> <span>{timeAgo(tool.createdAt)}</span></p>
             </div>
 
@@ -767,12 +767,31 @@ const UserProfile = () => {
     });
   };
 
+  const handleEditImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image size must be less than 5MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setEditToolData((prev) => ({ ...prev, image: reader.result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleModalSave = async () => {
     const token = localStorage.getItem("token");
     try {
+      const locationVal = typeof editToolData.location === "object" ? editToolData.location?.address : editToolData.location;
       const { data: updatedTool } = await axios.put( `${apiBaseUrl}/tools/${editToolData._id}`, {
         title: editToolData.title,
         description: editToolData.description,
+        category: editToolData.category,
+        condition: editToolData.condition,
+        location: locationVal,
+        image: editToolData.image,
       }, { headers: { Authorization: `Bearer ${token}` } });
       setLentTools((prev) => prev.map((tool) => (tool._id === updatedTool._id ? updatedTool : tool)));
       setIsModalOpen(false);
@@ -1430,22 +1449,72 @@ const UserProfile = () => {
       {/* --- Edit Tool Modal --- */}
       {isModalOpen && editToolData && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md relative border border-slate-100 animate-slide-up-fade">
+          <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-2xl relative border border-slate-100 animate-slide-up-fade">
             <button onClick={() => setIsModalOpen(false)} className="absolute top-5 right-5 rounded-full p-2 bg-slate-100 text-slate-400 hover:text-slate-700 transition-all">
               <XMarkIcon className="h-5 w-5" />
             </button>
             <h2 className="text-xl font-black mb-1.5 text-slate-800">Edit Tool</h2>
             <p className="text-xs text-slate-400 mb-6 font-semibold text-slate-550">Update your tool listing details below.</p>
-            <div className="space-y-4 text-xs font-semibold text-slate-600">
-              <div>
-                <label htmlFor="title" className="block text-slate-500 mb-1">Title</label>
-                <input type="text" id="title" className="w-full rounded-xl border border-slate-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white" value={editToolData.title} onChange={(e) => setEditToolData({ ...editToolData, title: e.target.value })} />
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs font-semibold text-slate-600">
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="title" className="block text-slate-500 mb-1">Title *</label>
+                  <input type="text" id="title" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-slate-750 font-medium" value={editToolData.title} onChange={(e) => setEditToolData({ ...editToolData, title: e.target.value })} required />
+                </div>
+                <div>
+                  <label htmlFor="category" className="block text-slate-500 mb-1">Category *</label>
+                  <input type="text" id="category" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-slate-750 font-medium" value={editToolData.category} onChange={(e) => setEditToolData({ ...editToolData, category: e.target.value })} required />
+                </div>
+                <div>
+                  <label htmlFor="condition" className="block text-slate-500 mb-1">Condition *</label>
+                  <select id="condition" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-slate-750 font-medium" value={editToolData.condition || "Good Condition"} onChange={(e) => setEditToolData({ ...editToolData, condition: e.target.value })} required>
+                    <option value="New">New</option>
+                    <option value="Like New">Like New</option>
+                    <option value="Good Condition">Good Condition</option>
+                    <option value="Fair">Fair</option>
+                    <option value="Poor">Poor</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="location" className="block text-slate-500 mb-1">Location *</label>
+                  <input type="text" id="location" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-slate-750 font-medium" value={typeof editToolData.location === "object" ? editToolData.location?.address : editToolData.location} onChange={(e) => setEditToolData({ ...editToolData, location: e.target.value })} required />
+                </div>
               </div>
-              <div>
-                <label htmlFor="description" className="block text-slate-500 mb-1">Description</label>
-                <textarea id="description" rows={4} className="w-full rounded-xl border border-slate-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white resize-none" value={editToolData.description} onChange={(e) => setEditToolData({ ...editToolData, description: e.target.value })} />
+
+              <div className="space-y-4 flex flex-col justify-between">
+                <div>
+                  <label htmlFor="description" className="block text-slate-500 mb-1">Description *</label>
+                  <textarea id="description" rows={4} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white resize-none text-slate-750 font-medium leading-relaxed" value={editToolData.description} onChange={(e) => setEditToolData({ ...editToolData, description: e.target.value })} required />
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1">Tool Image</label>
+                  <div className="flex items-center gap-3">
+                    <img 
+                      src={editToolData.image || 'https://via.placeholder.com/80'} 
+                      alt="Preview" 
+                      className="h-14 w-14 rounded-xl object-cover border border-slate-200 bg-slate-50" 
+                      onError={(e) => {
+                        e.target.src = "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=600&auto=format&fit=crop";
+                        e.target.onerror = null;
+                      }}
+                    />
+                    <div className="relative overflow-hidden inline-block">
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        onChange={handleEditImageChange} 
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+                      />
+                      <button type="button" className="px-3.5 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-750 text-xs font-bold transition-all border border-slate-250">
+                        Upload Photo
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
+
             <div className="flex justify-end gap-3 mt-8 text-xs font-bold">
               <button className="px-5 py-2.5 rounded-full bg-slate-100 text-slate-650 hover:bg-slate-200" onClick={() => setIsModalOpen(false)}>Cancel</button>
               <button className="px-5 py-2.5 rounded-full bg-indigo-600 text-white hover:bg-indigo-750 shadow-md shadow-indigo-600/10" onClick={handleModalSave}>Save Changes</button>

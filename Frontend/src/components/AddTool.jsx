@@ -29,6 +29,7 @@ const AddTool = () => {
   const [bookingEndDate, setBookingEndDate] = useState("");
   const [pickupTime, setPickupTime] = useState("");
   const [returnDeadline, setReturnDeadline] = useState("");
+  const [condition, setCondition] = useState("Good Condition");
   const [currentUserData, setCurrentUserData] = useState({ id: null, name: "" });
 
   const navigate = useNavigate();
@@ -124,6 +125,7 @@ const AddTool = () => {
           category: category.trim(),
           image: image.trim(),
           location: location.trim(),
+          condition,
           available: true,
           bookingStartDate: bookingStartDate || null,
           bookingEndDate: bookingEndDate || null,
@@ -227,6 +229,25 @@ const AddTool = () => {
                         className="w-full border border-slate-200 bg-white rounded-xl p-3 pl-11 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-700 font-medium shadow-sm hover:border-slate-350"
                         required
                       />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-600 font-bold text-xs mb-1.5">Condition *</label>
+                    <div className="relative">
+                      <WrenchScrewdriverIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-5 w-5 text-indigo-500" />
+                      <select
+                        value={condition}
+                        onChange={(e) => setCondition(e.target.value)}
+                        className="w-full border border-slate-200 bg-white rounded-xl p-3 pl-11 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-700 font-medium shadow-sm hover:border-slate-350"
+                        required
+                      >
+                        <option value="New">New</option>
+                        <option value="Like New">Like New</option>
+                        <option value="Good Condition">Good Condition</option>
+                        <option value="Fair">Fair</option>
+                        <option value="Poor">Poor</option>
+                      </select>
                     </div>
                   </div>
                 </div>
