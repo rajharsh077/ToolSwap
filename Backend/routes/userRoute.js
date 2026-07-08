@@ -22,12 +22,26 @@ router.post("/addTool", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "You are not authorized to add tool for this user." });
     }
 
+    let parsedLocation;
+    if (typeof location === "string") {
+      parsedLocation = { lat: 28.6139, lng: 77.209, address: location };
+    } else if (location) {
+      parsedLocation = {
+        lat: location.lat != null ? location.lat : 28.6139,
+        lng: location.lng != null ? location.lng : 77.209,
+        address: location.address || "Location provided"
+      };
+    } else {
+      parsedLocation = { lat: 28.6139, lng: 77.209, address: "Location provided" };
+    }
+
     const newTool = new toolModel({
       title,
       description,
       category,
       image,
-      location,
+      location: parsedLocation,
+      condition: req.body.condition || "Good Condition",
       owner,
       available: available !== undefined ? available : true,
     });
@@ -434,6 +448,51 @@ router.put("/notifications/read", authenticateToken, async (req, res) => {
   } catch (err) {
     console.error("Error marking notifications read:", err);
     res.status(500).json({ message: "Failed to mark notifications read" });
+  }
+});
+
+// -------------------- Admin Broadcast Announcement --------------------
+// Path: /admin/broadcast (accessed via /user/admin/broadcast)
+router.post("/admin/broadcast", authenticateToken, async (req, res) => {
+  try {
+    // Verify admin role
+    const adminUser = await userModel.findById(req.user.id);
+    if (!adminUser || !adminUser.isAdmin) {
+      return res.status(403).json({ message: "Access denied. Admin authorization required." });
+    }
+
+    const { title, message, target } = req.body;
+    if (!title || !message) {
+      return res.status(400).json({ message: "Title and message are required." });
+    }
+
+    const query = { isAdmin: { $ne: true } };
+    if (target === "verified") {
+      query.isVerified = true;
+    } else if (target === "suspended") {
+      query.isSuspended = true;
+    }
+
+    const notificationPayload = {
+      title,
+      message,
+      type: "announcement",
+      isRead: false,
+      createdAt: new Date()
+    };
+
+    const updateResult = await userModel.updateMany(query, {
+      $push: { notifications: notificationPayload }
+    });
+
+    res.json({ 
+      message: `Announcement broadcast successfully to ${target} users.`,
+      matchedCount: updateResult.matchedCount,
+      modifiedCount: updateResult.modifiedCount
+    });
+  } catch (err) {
+    console.error("Error broadcasting announcement:", err);
+    res.status(500).json({ message: "Failed to broadcast announcement" });
   }
 });
 

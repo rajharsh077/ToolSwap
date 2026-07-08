@@ -60,6 +60,9 @@ router.post("/request/:toolId", authenticateToken, async (req, res) => {
 
     const tool = await Tool.findById(toolId).populate("owner");
     if (!tool) return res.status(404).json({ message: "Tool not found" });
+    if (tool.owner._id.toString() === userId) {
+      return res.status(400).json({ message: "You cannot borrow your own tool." });
+    }
     if (!tool.available) return res.status(400).json({ message: "Tool not available" });
 
     const borrower = await User.findById(userId);
@@ -136,6 +139,7 @@ router.put("/request/:toolId/:borrowerId", authenticateToken, async (req, res) =
         available: false,
         borrowedBy: borrowerId,
         borrowedAt: new Date(),
+        $inc: { borrowCount: 1 }
       });
 
       if (!borrower.notifications) borrower.notifications = [];
@@ -194,10 +198,24 @@ router.put("/request/:toolId/:borrowerId", authenticateToken, async (req, res) =
   }
 });
 
-// -------------------- Update a tool's availability --------------------
+// -------------------- Update a tool's availability & details --------------------
 router.put("/:toolId", authenticateToken, async (req, res) => {
   try {
-    const tool = await Tool.findByIdAndUpdate(req.params.toolId, req.body, { new: true });
+    const updateData = { ...req.body };
+    if (updateData.location !== undefined) {
+      if (typeof updateData.location === "string") {
+        updateData.location = { lat: 28.6139, lng: 77.209, address: updateData.location };
+      } else if (updateData.location) {
+        updateData.location = {
+          lat: updateData.location.lat != null ? updateData.location.lat : 28.6139,
+          lng: updateData.location.lng != null ? updateData.location.lng : 77.209,
+          address: updateData.location.address || "Location provided"
+        };
+      } else {
+        updateData.location = { lat: 28.6139, lng: 77.209, address: "Location provided" };
+      }
+    }
+    const tool = await Tool.findByIdAndUpdate(req.params.toolId, updateData, { new: true });
     res.json(tool);
   } catch (error) {
     console.error(error);

@@ -131,6 +131,15 @@ borrowedAt: {
     default: ""
   },
 
+  borrowCount: {
+    type: Number,
+    default: 0
+  },
+  condition: {
+    type: String,
+    default: "Good Condition"
+  },
+
   reviews: [
     {
       borrower: {

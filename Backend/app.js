@@ -25,7 +25,76 @@ const userRoute = require("./routes/userRoute");
 const toolRoute = require("./routes/toolsRoute");
 const chatRoute = require("./routes/chatRoute");
 
-dbConnection();
+dbConnection().then(() => {
+  migrateBorrowCount();
+});
+
+async function migrateBorrowCount() {
+  try {
+    const tools = await toolModel.find();
+    console.log(`Running borrowCount and properties migration for ${tools.length} tools...`);
+    for (let tool of tools) {
+      const users = await userModel.find({
+        "toolsLentOut.tool": tool._id,
+        "toolsLentOut.status": { $in: ["approved", "returned"] }
+      });
+      
+      let count = 0;
+      for (let u of users) {
+        count += u.toolsLentOut.filter(
+          t => t.tool && t.tool.toString() === tool._id.toString() && ["approved", "returned"].includes(t.status)
+        ).length;
+      }
+
+      const finalCount = Math.max(count, tool.reviews?.length || 0);
+      let needsSave = false;
+
+      if (tool.borrowCount === undefined || tool.borrowCount === null || tool.borrowCount !== finalCount) {
+        tool.borrowCount = finalCount;
+        needsSave = true;
+      }
+
+      // Fix location if empty or invalid
+      if (!tool.location || (typeof tool.location === "object" && !tool.location.address && !tool.location.lat && !tool.location.lng)) {
+        const owner = await userModel.findById(tool.owner);
+        if (owner && owner.location) {
+          tool.location = { lat: 28.6139, lng: 77.209, address: owner.location };
+          needsSave = true;
+          console.log(`Copied owner's location "${owner.location}" to tool "${tool.title}"`);
+        } else {
+          tool.location = { lat: 28.6139, lng: 77.209, address: "Location provided" };
+          needsSave = true;
+        }
+      } else if (typeof tool.location === "string") {
+        tool.location = { lat: 28.6139, lng: 77.209, address: tool.location };
+        needsSave = true;
+      } else {
+        if (tool.location.lat == null || tool.location.lng == null) {
+          tool.location = {
+            lat: tool.location.lat != null ? tool.location.lat : 28.6139,
+            lng: tool.location.lng != null ? tool.location.lng : 77.209,
+            address: tool.location.address || "Location provided"
+          };
+          needsSave = true;
+        }
+      }
+
+      // Fix condition
+      if (!tool.condition) {
+        tool.condition = "Good Condition";
+        needsSave = true;
+      }
+
+      if (needsSave) {
+        await tool.save();
+        console.log(`Updated tool "${tool.title}" (${tool._id}) properties (borrowCount: ${tool.borrowCount}, location: ${JSON.stringify(tool.location)}, condition: ${tool.condition})`);
+      }
+    }
+    console.log("borrowCount and properties migration completed successfully.");
+  } catch (err) {
+    console.error("Error during borrowCount migration:", err);
+  }
+}
 app.use(cors({
   origin: process.env.FRONTEND_URL || "http://localhost:5173",
   credentials: true,
