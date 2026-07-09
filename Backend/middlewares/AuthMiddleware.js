@@ -6,7 +6,7 @@ const userModel = require("../models/users");
 const generateToken = (user) => {
     return jwt.sign(
         { id: user._id, email: user.email, name: user.name, isAdmin: Boolean(user.isAdmin) },
-        process.env.JWT_SECRET, 
+        process.env.JWT_SECRET || "ABC123", 
         { expiresIn: "1d" }
     );
 };
