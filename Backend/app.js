@@ -210,6 +210,21 @@ app.get("/", (req, res) => {
   res.send("✅ ToolSwap backend is running...");
 });
 
+app.get("/db-status", async (req, res) => {
+  try {
+    const mongoose = require('mongoose');
+    const state = mongoose.connection.readyState;
+    const states = ["disconnected", "connected", "connecting", "disconnecting"];
+    res.json({
+      status: "running",
+      database: states[state],
+      mongoUriConfigured: Boolean(process.env.MONGO_URI)
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ------------------- AUTH ROUTES -------------------
 app.post("/signup", async (req, res) => {
   try {
@@ -239,6 +254,9 @@ app.post("/signup", async (req, res) => {
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
     const normalizedEmail = (email || "").toLowerCase();
 
     let user = await userModel.findOne({ email: normalizedEmail });
