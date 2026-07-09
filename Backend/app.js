@@ -215,10 +215,28 @@ app.get("/db-status", async (req, res) => {
     const mongoose = require('mongoose');
     const state = mongoose.connection.readyState;
     const states = ["disconnected", "connected", "connecting", "disconnecting"];
+    
+    let userCount = 0;
+    let missingPasswordCount = 0;
+    let usersList = [];
+    if (state === 1) {
+      userCount = await userModel.countDocuments();
+      missingPasswordCount = await userModel.countDocuments({ password: { $exists: false } });
+      const users = await userModel.find({}, "email isAdmin password");
+      usersList = users.map(u => ({
+        email: u.email,
+        isAdmin: u.isAdmin,
+        hasPassword: Boolean(u.password)
+      }));
+    }
+
     res.json({
       status: "running",
       database: states[state],
-      mongoUriConfigured: Boolean(process.env.MONGO_URI)
+      mongoUriConfigured: Boolean(process.env.MONGO_URI),
+      userCount,
+      missingPasswordCount,
+      users: usersList
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -281,6 +299,10 @@ app.post("/login", async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
     if (user.isBanned) return res.status(403).json({ message: "Your account has been banned" });
     if (user.isSuspended) return res.status(403).json({ message: "Your account has been suspended" });
+
+    if (!user.password) {
+      return res.status(400).json({ message: "User account password is missing in the database. Please sign up again." });
+    }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
