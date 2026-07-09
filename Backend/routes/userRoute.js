@@ -239,7 +239,7 @@ const isAdmin = (req, res, next) => {
 // Path: /admin/stats (accessed via /user/admin/stats)
 router.get("/admin/stats", authenticateToken, isAdmin, async (req, res) => {
   try {
-    const totalUsers = await userModel.countDocuments();
+    const totalUsers = await userModel.countDocuments({ isAdmin: { $ne: true } });
     const totalTools = await toolModel.countDocuments();
     const activeLoans = await toolModel.countDocuments({ borrowedBy: { $ne: null } });
     const flaggedTools = await toolModel.countDocuments({ isFlagged: true });

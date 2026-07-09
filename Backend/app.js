@@ -371,7 +371,7 @@ app.get("/tools", async (req, res) => {
 
 app.get("/stats", async (req, res) => {
   try {
-    const totalUsers = await userModel.countDocuments();
+    const totalUsers = await userModel.countDocuments({ isAdmin: { $ne: true } });
     const availableTools = await toolModel.countDocuments({ available: true, isFlagged: { $ne: true } });
     
     const categories = await toolModel.distinct("category");
