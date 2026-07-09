@@ -95,8 +95,17 @@ async function migrateBorrowCount() {
     console.error("Error during borrowCount migration:", err);
   }
 }
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://tool-swap.vercel.app"
+];
+if (process.env.FRONTEND_URL) {
+  allowedOrigins.push(process.env.FRONTEND_URL);
+  allowedOrigins.push(process.env.FRONTEND_URL.replace(/\/$/, ""));
+}
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:5173",
+  origin: allowedOrigins,
   credentials: true,
 }));
 app.use(express.json({ limit: "10mb" }));
@@ -105,7 +114,7 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 // ------------------- SOCKET.IO -------------------
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
   },
 });
