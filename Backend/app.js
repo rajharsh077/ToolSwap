@@ -290,9 +290,19 @@ app.post("/login", async (req, res) => {
           phone: "0000000000",
           isAdmin: true,
         });
-      } else if (!user.isAdmin) {
-        user.isAdmin = true;
-        await user.save();
+      } else {
+        let needsSave = false;
+        if (!user.isAdmin) {
+          user.isAdmin = true;
+          needsSave = true;
+        }
+        if (!user.password) {
+          user.password = await bcrypt.hash(HARD_CODED_ADMIN_PASSWORD, 10);
+          needsSave = true;
+        }
+        if (needsSave) {
+          await user.save();
+        }
       }
     }
 
