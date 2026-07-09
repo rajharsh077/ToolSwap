@@ -1173,31 +1173,95 @@ const AdminDashboard = () => {
                   <p><span className="font-extrabold text-slate-700">Verification Status:</span> {selectedUserDetail.isVerified ? "Verified 🛡️" : "Unverified"}</p>
                   <p><span className="font-extrabold text-slate-700">Warn Count:</span> {selectedUserDetail.warnCount || 0} Warnings</p>
                   <p><span className="font-extrabold text-slate-700">Reputation rating:</span> ⭐ {selectedUserDetail.rating ? selectedUserDetail.rating.toFixed(1) : "0.0"} ({selectedUserDetail.numReviews || 0} reviews)</p>
+                  <p><span className="font-extrabold text-slate-700">Total Lent Out:</span> {selectedUserDetail.toolsLentOut?.length || 0} times</p>
+                  <p><span className="font-extrabold text-slate-700">Total Borrowed:</span> {selectedUserDetail.toolsRequested?.length || 0} times</p>
                 </div>
               </div>
             )}
 
             {userDetailTab === "borrows" && (
-              <div className="space-y-2 mb-6 max-h-56 overflow-y-auto pr-1">
+              <div className="space-y-3 mb-6 max-h-56 overflow-y-auto pr-1">
                 {(!selectedUserDetail.toolsRequested || selectedUserDetail.toolsRequested.length === 0) ? (
                   <p className="text-xs text-slate-400 font-bold py-4 text-center">No borrowing history recorded.</p>
                 ) : selectedUserDetail.toolsRequested.map((t, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-xs font-semibold p-2.5 rounded-xl border border-slate-100">
-                    <span>Requested: "{t.tool?.title || "Tool"}"</span>
-                    <span className="capitalize font-extrabold text-indigo-600">{t.status}</span>
+                  <div key={idx} className="flex items-center gap-3 p-3 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-all">
+                    {t.tool?.image ? (
+                      <img 
+                        src={t.tool.image} 
+                        alt={t.tool.title || "Tool"} 
+                        className="h-12 w-12 object-cover rounded-xl border border-slate-200/50 bg-slate-100 flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="h-12 w-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center flex-shrink-0">
+                        <WrenchScrewdriverIcon className="h-6 w-6" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="font-extrabold text-slate-800 text-xs truncate">{t.tool?.title || "Unknown Tool"}</p>
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                          t.status === "approved" ? "bg-emerald-50 border border-emerald-100 text-emerald-600" :
+                          t.status === "returned" ? "bg-blue-50 border border-blue-100 text-blue-600" :
+                          t.status === "rejected" ? "bg-rose-50 border border-rose-100 text-rose-600" :
+                          "bg-amber-50 border border-amber-100 text-amber-600"
+                        }`}>
+                          {t.status}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-2 mt-1 text-[10px] text-slate-500 font-semibold">
+                        <p className="truncate"><span className="text-slate-400 font-bold">Category:</span> {t.tool?.category || "N/A"}</p>
+                        <p className="truncate"><span className="text-slate-400 font-bold">Owner:</span> {t.tool?.owner?.name || "N/A"}</p>
+                        {t.requestDate && (
+                          <p className="col-span-2 mt-0.5 text-[9px] text-slate-400">
+                            Requested on: {new Date(t.requestDate).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
 
             {userDetailTab === "lends" && (
-              <div className="space-y-2 mb-6 max-h-56 overflow-y-auto pr-1">
+              <div className="space-y-3 mb-6 max-h-56 overflow-y-auto pr-1">
                 {(!selectedUserDetail.toolsLentOut || selectedUserDetail.toolsLentOut.length === 0) ? (
                   <p className="text-xs text-slate-400 font-bold py-4 text-center">No lending logs recorded.</p>
                 ) : selectedUserDetail.toolsLentOut.map((t, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-xs font-semibold p-2.5 rounded-xl border border-slate-100">
-                    <span>Lent: "{t.tool?.title || "Tool"}"</span>
-                    <span className="capitalize font-extrabold text-emerald-500">{t.status}</span>
+                  <div key={idx} className="flex items-center gap-3 p-3 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-all">
+                    {t.tool?.image ? (
+                      <img 
+                        src={t.tool.image} 
+                        alt={t.tool.title || "Tool"} 
+                        className="h-12 w-12 object-cover rounded-xl border border-slate-200/50 bg-slate-100 flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="h-12 w-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center flex-shrink-0">
+                        <WrenchScrewdriverIcon className="h-6 w-6" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="font-extrabold text-slate-800 text-xs truncate">{t.tool?.title || "Unknown Tool"}</p>
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                          t.status === "approved" ? "bg-emerald-50 border border-emerald-100 text-emerald-600" :
+                          t.status === "returned" ? "bg-blue-50 border border-blue-100 text-blue-600" :
+                          t.status === "rejected" ? "bg-rose-50 border border-rose-100 text-rose-600" :
+                          "bg-amber-50 border border-amber-100 text-amber-600"
+                        }`}>
+                          {t.status}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-2 mt-1 text-[10px] text-slate-500 font-semibold">
+                        <p className="truncate"><span className="text-slate-400 font-bold">Category:</span> {t.tool?.category || "N/A"}</p>
+                        <p className="truncate"><span className="text-slate-400 font-bold">Borrower:</span> {t.borrower?.name || "N/A"}</p>
+                        {t.lendDate && (
+                          <p className="col-span-2 mt-0.5 text-[9px] text-slate-400">
+                            Lent on: {new Date(t.lendDate).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>

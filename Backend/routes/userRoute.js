@@ -318,7 +318,17 @@ router.get("/admin/analytics", authenticateToken, isAdmin, async (req, res) => {
 // Path: /admin/users (accessed via /user/admin/users)
 router.get("/admin/users", authenticateToken, isAdmin, async (req, res) => {
   try {
-    const users = await userModel.find({}).select("-password");
+    const users = await userModel.find({})
+      .select("-password")
+      .populate({
+        path: "toolsRequested.tool",
+        populate: {
+          path: "owner",
+          select: "name email"
+        }
+      })
+      .populate("toolsLentOut.tool")
+      .populate("toolsLentOut.borrower", "name email");
     res.json(users);
   } catch (err) {
     console.error("Error fetching all users:", err);
